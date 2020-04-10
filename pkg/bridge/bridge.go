@@ -145,7 +145,7 @@ func (b *Bridge) handleConnection(conn net.Conn) error {
 	}
 	logrus.Debugf("message final: %x", messageBuffer)
 	message := comfoconnect.NewMessage(messageBuffer)
-	logrus.Debugf("got a message with type: %v: %v", message.Cmd.Type.String(), message)
+	logrus.Debugf("got a message with: %v", message)
 
 	switch message.Cmd.Type.String() {
 	case "RegisterAppRequestType":
