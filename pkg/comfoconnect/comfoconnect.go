@@ -75,25 +75,30 @@ func (m Message) CreateResponse(msg []byte, operationType proto.GatewayOperation
 	}
 
 	cmdBytes, _ := cmd.XXX_Marshal(nil, false)
-	b := make([]byte, 4)
-	binary.BigEndian.PutUint32(b, uint32(len(msg))) // msg length
-	logrus.Debugf("size message(%d): %x", len(msg), b)
-	b = append(b, m.src...)
-	logrus.Debugf("src message: %x", b)
-	b = append(b, m.dst...)
-	logrus.Debugf("dst message: %x", b)
-	b = append(b, []byte{0x00, 0x04}...) // cmd length, hardcoded to 4
-	logrus.Debugf("len message: %x", b)
-	b = append(b, cmdBytes...) // gatewayOperation
-	logrus.Debugf("cmd message: %x", b)
-	b = append(b, msg...)
-	logrus.Debugf("msg message: %x", b)
+	response := make([]byte, 4)
+	binary.BigEndian.PutUint32(response, uint32(len(msg) + 34 + len(cmdBytes))) // msg length
+	logrus.Debugf("size message(%d): %x", len(msg), response)
+	response = append(response, m.src...)
+	logrus.Debugf("src message: %x", response)
+	response = append(response, m.dst...)
+	logrus.Debugf("dst message: %x", response)
+	b := make([]byte, 2)
+	binary.BigEndian.PutUint16(b, uint16(len(cmdBytes))) // cmd length
+	response = append(response, b...)
+	logrus.Debugf("len message: %x", response)
+	response = append(response, cmdBytes...) // gatewayOperation
+	logrus.Debugf("cmd message: %x", response)
+	response = append(response, msg...)
+	logrus.Debugf("msg message: %x", response)
 
-	return b
+	return response
 }
 
-// 000000122ffbbe53b6234079aa7c8a6872da115a000000000025101080017085c2b78ca00004 08351000 200e0a0e4f6e65506c757320474d313931331000
-// 000000002ffbbe53b6234079aa7c8a6872da115a000000000025101080017085c2b78ca00004 08351000 200f
+// 00000026 0000000000251010800170b3d54264b4af154804169043898d2da77148f886be00 04 08342002 RegisterAppConfirm example
+// 00000026 54a9e98e1ea64900b88909f3798486d3000000000025101080017085c2b78ca000 04 08342000 RegisterAppConfirm valid
+
+// 00000028 0000000000251010800170b3d54264b4af154804169043898d2da77148f886be00 06 08351000 2003 StartSessionConfirm example valid
+// 00000028 5329f4b676a948a8ab96416f72b23897000000000025101080017085c2b78ca000 06 08351000 200e StartSessionConfirm + size, invalid
 
 
 // take an IP address, and a MAC address to respond with and create search gateway response
