@@ -1,14 +1,12 @@
 package bridge
 
 import (
-	"encoding/binary"
-	"fmt"
+	"io"
 	"net"
 	"sync"
 	"time"
 
 	"github.com/pkg/errors"
-
 	"github.com/sirupsen/logrus"
 
 	//"github.com/hsmade/comfoconnectbridge/proto"
@@ -18,13 +16,11 @@ import (
 )
 
 type Bridge struct {
-	myIP             string // IP to bind to and return with on broadcast requests
-	comfoconnectIP   string
-	listener         *net.TCPListener
-	quit             chan bool
-	exited           chan bool
-	toComfoConnect   chan []byte
-	fromComfoConnect chan []byte
+	myIP           string // IP to bind to and return with on broadcast requests
+	comfoconnectIP string
+	listener       *net.TCPListener
+	quit           chan bool
+	exited         chan bool
 }
 
 func NewBridge(myIP, comfoconnectIP string) *Bridge {
@@ -39,13 +35,11 @@ func NewBridge(myIP, comfoconnectIP string) *Bridge {
 	}
 
 	b := Bridge{
-		myIP:             myIP,
-		comfoconnectIP:   comfoconnectIP,
-		listener:         listener,
-		quit:             make(chan bool),
-		exited:           make(chan bool),
-		toComfoConnect:   make(chan []byte),
-		fromComfoConnect: make(chan []byte),
+		myIP:           myIP,
+		comfoconnectIP: comfoconnectIP,
+		listener:       listener,
+		quit:           make(chan bool),
+		exited:         make(chan bool),
 	}
 
 	return &b
@@ -82,7 +76,7 @@ func (b *Bridge) Run() {
 			handlers.Add(1)
 			go func() {
 				for {
-					err := b.handleConnection(conn)
+					err := b.handleClient(conn)
 					if err != nil {
 						logrus.Errorf("failed to handle connection: %v", err)
 						break
@@ -94,78 +88,31 @@ func (b *Bridge) Run() {
 	}
 }
 
-func (b *Bridge) handleConnection(conn net.Conn) error {
+func (b *Bridge) handleClient(conn net.Conn) error {
 	logrus.Debugf("handling connection from %v", conn.RemoteAddr())
-	//defer conn.Close()
+	defer conn.Close()
 
-	// get the messageSize of the messageBuffer
-	var readBuffer []byte
-	readBytes := 0
 	for {
-		b := make([]byte, 4-readBytes)
-		readLen, err := conn.Read(b)
+		message, err := comfoconnect.GetMessageFromSocket(conn)
 		if err != nil {
-			msg := fmt.Sprintf("failed to read message. Got messageSize=%d and err=%v", readLen, err)
-			logrus.Error(msg)
-			return errors.New(msg)
+			if err == io.EOF || err.Error() == "reading from socket: EOF" { // FIXME: why doesn't io.EOF work?
+				logrus.Warnf("client %s closed connection", conn.RemoteAddr())
+				return errors.Wrap(err, "tried to read from a closed connection")
+			}
+
+			logrus.Errorf("failed to parse this message from: %s: %v", conn.RemoteAddr(), err)
+			continue
 		}
 
-		logrus.Debugf("got %d bytes: %x", readLen, b)
-		readBytes += readLen
-		if readLen > 0 {
-			readBuffer = append(readBuffer, b[:readLen]...)
-			logrus.Debugf("appending %d bytes (%x), result: %x", readLen, b, readBuffer)
-		}
+		logrus.Infof("got a message from: %s: %v", conn.RemoteAddr(), message)
 
-		if readBytes >= 4 {
-			break
-		}
-	}
-
-	messageSize := binary.BigEndian.Uint32(readBuffer)
-	//logrus.Debugf("got a message with size: %d", messageSize)
-	rest := messageSize
-
-	// get the rest of the messageBuffer
-	messageBuffer := readBuffer
-	for {
-		buf := make([]byte, 1024)
-		reqLen, err := conn.Read(buf)
-		if err != nil {
-			return errors.Wrap(err, "error reading connection")
-		}
-		logrus.Debugf("received(%d): %x", reqLen, buf[:reqLen+1])
-		if uint32(reqLen) > rest {
-			msg := fmt.Sprintf("expected max %d, but got %d: %x", rest, reqLen, buf)
-			logrus.Error(msg)
-			//return errors.New(msg)
-		}
-		rest = rest - uint32(reqLen)
-		messageBuffer = append(messageBuffer, buf[:reqLen]...)
-		logrus.Debugf("message is now: %x", messageBuffer)
-		if rest <= 0 {
-			break
+		switch message.Operation.Type.String() {
+		case "StartSessionRequestType":
+			b.respond(conn, message.CreateResponse(proto.GatewayOperation_OK))
+		default:
+			b.respond(conn, message.CreateResponse(-1))
 		}
 	}
-	logrus.Debugf("message final: %x", messageBuffer)
-	message := comfoconnect.NewMessage(messageBuffer)
-	logrus.Debugf("got a message with: %v", message)
-
-	switch message.Operation.Type.String() {
-	case "StartSessionRequestType":
-		b.respond(conn, message.CreateResponse(proto.GatewayOperation_OK))
-	default:
-		b.respond(conn, message.CreateResponse(-1))
-	}
-
-	// TODO: implementation
-	// respond to RegisterAppRequest with RegisterAppConfirm and don't forward
-	// respond to StartSessionRequest with StartSessionConfirm and don't forward
-
-	// forward the message to our local comfoconnect first.
-	// if it's a session request, open up a new session so we forward message coming from comfoconnect back to them
-
-	return nil
 }
 
 func (b *Bridge) Stop() {

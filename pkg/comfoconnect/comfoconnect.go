@@ -3,50 +3,123 @@ package comfoconnect
 import (
 	"encoding/binary"
 	"fmt"
+	"net"
 	"reflect"
+	"time"
 
+	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
 	"github.com/hsmade/comfoconnectbridge/proto"
 )
 
-type OperationTyp interface {
+type OperationType interface { // FIXME: rename
 	XXX_Unmarshal([]byte) error
 	XXX_Marshal(b []byte, deterministic bool) ([]byte, error)
 }
 
 type Message struct {
-	length        uint32
 	src           []byte
 	dst           []byte
 	Operation     proto.GatewayOperation
-	rawMessage    []byte
-	OperationType OperationTyp
+	rawMessage    []byte // FIXME: do we need this?
+	OperationType OperationType
 }
 
-func NewMessage(b []byte) Message {
-	operation := proto.GatewayOperation{}
-	operation.XXX_Unmarshal(b[38:42]) // we assume here that this is always a gateway operation, else we'd have to read the operation length from [36:38]
+func GetMessageFromSocket(conn net.Conn) (Message, error) {
+	lengthBytes, err := readBytes(conn, 4)
+	if err != nil {
+		logrus.Errorf("failed to read message length int: %v", err)
+		return Message{}, errors.Wrap(err, "reading message length")
+	}
+	length := binary.BigEndian.Uint32(lengthBytes)
+
+	if length < 0 || length > 1024 {
+		msg := fmt.Sprintf("got invalid length: %d", length)
+		logrus.Debug(msg)
+		return Message{}, errors.New(msg)
+	}
+	logrus.Debugf("length: %d", length)
+
+	src, err := readBytes(conn, 16)
+	if err != nil {
+		logrus.Errorf("failed to read src: %v", err)
+		return Message{}, errors.Wrap(err, "reading src")
+	}
+	logrus.Debugf("src: %x", src)
+
+	dst, err := readBytes(conn, 16)
+	if err != nil {
+		logrus.Errorf("failed to read dst: %v", err)
+		return Message{}, errors.Wrap(err, "reading dst")
+	}
+	logrus.Debugf("dst: %x", dst)
+
+	operationLengthBytes, err := readBytes(conn, 2)
+	if err != nil {
+		logrus.Errorf("failed to read operation length int: %v", err)
+		return Message{}, errors.Wrap(err, "reading operation length")
+	}
+	operationLength := binary.BigEndian.Uint16(operationLengthBytes)
+	operationLength = 4 // FIXME: sign error above?
+
+	if operationLength < 1 || operationLength > 1024 {
+		msg := fmt.Sprintf("got invalid operationLength: %d", operationLength)
+		logrus.Debug(msg)
+		return Message{}, errors.New(msg)
+	}
+	logrus.Debugf("operationLength: %d", operationLength)
+
+	operationBytes, err := readBytes(conn, int(operationLength))
+	if err != nil {
+		logrus.Errorf("failed to read operation: %v", err)
+		return Message{}, errors.Wrap(err, "reading operation")
+	}
+	logrus.Debugf("operationBytes: %x", operationBytes)
+
+	operationTypeLength := (length - 34) - uint32(operationLength)
+	var operationTypeBytes []byte
+	if operationTypeLength > 0 {
+		logrus.Debugf("operationTypeLength: %d", operationTypeLength)
+		msg := make([]byte, operationTypeLength)
+
+		msg, err := readBytes(conn, int(operationTypeLength))
+		if err != nil {
+			logrus.Errorf("failed to read operationTypeBytes: %v", err)
+			return Message{}, errors.Wrap(err, "reading operation type")
+		}
+		logrus.Debugf("operationTypeBytes: %x", msg)
+	}
+
+	operation := proto.GatewayOperation{} // FIXME: parse instead of assume
+	err = operation.XXX_Unmarshal(operationBytes)
+	if err != nil {
+		return Message{}, errors.Wrap(err, "failed to unmarshal operation")
+	}
 
 	operationType := getStructForType(operation.Type.String())
-	operationType.XXX_Unmarshal(b[42:])
+	err = operationType.XXX_Unmarshal(operationTypeBytes)
+	if err != nil {
+		//return Message{}, errors.Wrap(err, "failed to unmarshal operation type") // FIXME
+		logrus.Errorf("failed to unmarshal operation type: %v", err)
+	}
 
-	m := Message{
-		length:        binary.BigEndian.Uint32(b[:4]),
-		src:           b[4:20],
-		dst:           b[20:36],
+	message := Message{
+		src:           src,
+		dst:           dst,
 		Operation:     operation,
-		rawMessage:    b[42:],
+		rawMessage:    operationTypeBytes,
 		OperationType: operationType,
 	}
 
-	return m
+	return message, nil
 }
 
 func (m Message) String() string {
 	return fmt.Sprintf("src=%x; dst=%x; Cmd_type=%v; ref=%v; rawMessage=%x", m.src, m.dst, m.Operation.Type.String(), *m.Operation.Reference, m.rawMessage)
 }
 
+// creates the correct response message as a byte slice, for the parent message
 func (m Message) CreateResponse(status proto.GatewayOperation_GatewayResult) []byte {
 	logrus.Debugf("creating response for operation type: %s", reflect.TypeOf(m.OperationType).Elem().Name())
 	responseType := getResponseTypeForOperationType(m.OperationType)
@@ -66,6 +139,7 @@ func (m Message) CreateResponse(status proto.GatewayOperation_GatewayResult) []b
 	}
 
 	// start building up the response byte slice
+	// FIXME: add debugging
 	operationBytes, _ := operation.XXX_Marshal(nil, false)
 	operationTypeBytes, _ := responseStruct.XXX_Marshal(nil, false)
 	response := make([]byte, 4)
@@ -100,8 +174,9 @@ func CreateSearchGatewayResponse(ipAddress string, macAddress []byte) []byte {
 	return b
 }
 
-func getStructForType(operationTypeString string) OperationTyp {
-	var operationType OperationTyp
+// takes the name for an operation type and finds the struct for it
+func getStructForType(operationTypeString string) OperationType {
+	var operationType OperationType
 	switch operationTypeString {
 	case "SetAddressRequestType":
 		operationType = &proto.SetAddressRequest{}
@@ -243,7 +318,8 @@ func getStructForType(operationTypeString string) OperationTyp {
 	return operationType
 }
 
-func getResponseTypeForOperationType(operationType OperationTyp) proto.GatewayOperation_OperationType {
+// takes an operation type and finds the correct response type
+func getResponseTypeForOperationType(operationType OperationType) proto.GatewayOperation_OperationType {
 	var responseTypeString proto.GatewayOperation_OperationType
 	operationTypeString := reflect.TypeOf(operationType).Elem().Name()
 
@@ -310,4 +386,30 @@ func getResponseTypeForOperationType(operationType OperationTyp) proto.GatewayOp
 		logrus.Debugf("found response type: %s for operation type: %s", responseTypeString, operationTypeString)
 	}
 	return responseTypeString
+}
+
+func readBytes(conn net.Conn, size int) ([]byte, error) {
+	var result []byte
+	for {
+		err := conn.SetReadDeadline(time.Now().Add(time.Second * 5))
+		if err != nil {
+			return nil, errors.Wrap(err, "setting timeout for read")
+		}
+
+		buffer := make([]byte, size)
+		readLen, err := conn.Read(buffer)
+		if err != nil {
+			return nil, errors.Wrap(err, "reading from socket")
+		}
+
+		if readLen > 0 {
+			size -= readLen
+			result = append(result, buffer[:readLen]...)
+		}
+
+		if size <= 0 {
+			break
+		}
+	}
+	return result, nil
 }
