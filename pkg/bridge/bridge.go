@@ -81,9 +81,12 @@ func (b *Bridge) Run() {
 			}
 			handlers.Add(1)
 			go func() {
-				err := b.handleConnection(conn)
-				if err != nil {
-					logrus.Errorf("failed to handle connection: %v", err)
+				for {
+					err := b.handleConnection(conn)
+					if err != nil {
+						logrus.Errorf("failed to handle connection: %v", err)
+						break
+					}
 				}
 				handlers.Done()
 			}()
@@ -93,12 +96,13 @@ func (b *Bridge) Run() {
 
 func (b *Bridge) handleConnection(conn net.Conn) error {
 	logrus.Debugf("handling connection from %v", conn.RemoteAddr())
-	defer conn.Close()
+	//defer conn.Close()
+
 	// get the messageSize of the messageBuffer
 	var readBuffer []byte
 	readBytes := 0
 	for {
-		b := make([]byte, 4 - readBytes)
+		b := make([]byte, 4-readBytes)
 		readLen, err := conn.Read(b)
 		if err != nil {
 			msg := fmt.Sprintf("failed to read message. Got messageSize=%d and err=%v", readLen, err)
@@ -106,11 +110,11 @@ func (b *Bridge) handleConnection(conn net.Conn) error {
 			return errors.New(msg)
 		}
 
-		//logrus.Debugf("got %d bytes: %x", readLen, b)
+		logrus.Debugf("got %d bytes: %x", readLen, b)
 		readBytes += readLen
 		if readLen > 0 {
 			readBuffer = append(readBuffer, b[:readLen]...)
-			//logrus.Debugf("appending %d bytes (%x), result: %x", readLen, b, readBuffer)
+			logrus.Debugf("appending %d bytes (%x), result: %x", readLen, b, readBuffer)
 		}
 
 		if readBytes >= 4 {
@@ -130,15 +134,15 @@ func (b *Bridge) handleConnection(conn net.Conn) error {
 		if err != nil {
 			return errors.Wrap(err, "error reading connection")
 		}
-		//logrus.Debugf("received(%d): %v", reqLen, buf[:reqLen+1])
+		logrus.Debugf("received(%d): %x", reqLen, buf[:reqLen+1])
 		if uint32(reqLen) > rest {
-			msg := fmt.Sprintf("expected max %d, but got %d", rest, reqLen)
+			msg := fmt.Sprintf("expected max %d, but got %d: %x", rest, reqLen, buf)
 			logrus.Error(msg)
-			return errors.New(msg)
+			//return errors.New(msg)
 		}
 		rest = rest - uint32(reqLen)
 		messageBuffer = append(messageBuffer, buf[:reqLen]...)
-		//logrus.Debugf("message is now: %x", messageBuffer)
+		logrus.Debugf("message is now: %x", messageBuffer)
 		if rest <= 0 {
 			break
 		}
@@ -147,28 +151,13 @@ func (b *Bridge) handleConnection(conn net.Conn) error {
 	message := comfoconnect.NewMessage(messageBuffer)
 	logrus.Debugf("got a message with: %v", message)
 
-	switch message.Cmd.Type.String() {
-	case "RegisterAppRequestType":
-		cmd := proto.RegisterAppConfirm{}
-		data, _ := cmd.XXX_Marshal(nil, false)
-		logrus.Debugf("responding with RegisterAppConfirm: %x", data)
-		b.respond(conn, message.CreateResponse(data, proto.GatewayOperation_RegisterAppConfirmType, -1))
+	switch message.Operation.Type.String() {
 	case "StartSessionRequestType":
-		//name := "OnePlus GM1913"
-		//resumed := false
-		cmd := proto.StartSessionConfirm{
-		//Devicename: &name,
-		//Resumed: &resumed,
-		}
-		data, _ := cmd.XXX_Marshal(nil, false)
-		logrus.Debugf("responding with StartSessionConfirm: %x", data)
-		b.respond(conn, message.CreateResponse(data, proto.GatewayOperation_StartSessionConfirmType, proto.GatewayOperation_OK))
-	case "CloseSessionRequestType":
-		cmd := proto.CloseSessionConfirm{}
-		data, _ := cmd.XXX_Marshal(nil, false)
-		logrus.Debugf("responding with CloseSessionConfirm: %x", data)
-		b.respond(conn, message.CreateResponse(data, proto.GatewayOperation_CloseSessionConfirmType, -1))
+		b.respond(conn, message.CreateResponse(proto.GatewayOperation_OK))
+	default:
+		b.respond(conn, message.CreateResponse(-1))
 	}
+
 	// TODO: implementation
 	// respond to RegisterAppRequest with RegisterAppConfirm and don't forward
 	// respond to StartSessionRequest with StartSessionConfirm and don't forward
