@@ -1,4 +1,4 @@
-package bridge
+package comfoconnect
 
 import (
 	"net"
@@ -8,8 +8,6 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/sirupsen/logrus"
-
-	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
 )
 
 type BroadcastListener struct {
@@ -89,7 +87,7 @@ func (l *BroadcastListener) Run() {
 
 func (l *BroadcastListener) handleConnection(addr *net.UDPAddr) error {
 	logrus.Debug("writing searchGatewayResponse")
-	_, err := l.listener.WriteToUDP(comfoconnect.CreateSearchGatewayResponse(l.ResponseIP, l.myMAC), addr)
+	_, err := l.listener.WriteToUDP(CreateSearchGatewayResponse(l.ResponseIP, l.myMAC), addr)
 	if err != nil {
 		logrus.Errorf("Failed to respond to SearchGatewayRequest: %v", err)
 		return errors.Wrap(err, "responding to SearchGatewayRequest")
