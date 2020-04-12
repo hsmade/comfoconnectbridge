@@ -12,6 +12,7 @@ import (
 	//"github.com/hsmade/comfoconnectbridge/proto"
 
 	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
+	"github.com/hsmade/comfoconnectbridge/proto"
 )
 
 type Bridge struct {
@@ -113,6 +114,17 @@ func (b *Bridge) handleClient(conn net.Conn) error {
 		switch message.Operation.Type.String() {
 		//case "StartSessionRequestType":
 		//	b.respond(conn, message.CreateResponse(proto.GatewayOperation_OK))
+		case "CnTimeRequestType":
+			i := uint32(1)
+			mode := proto.CnNodeNotification_NODE_NORMAL
+			a := proto.CnNodeNotification{
+				NodeId:               &i,
+				ProductId:            &i,
+				ZoneId:               &i,
+				Mode:                 &mode,
+			}
+			b.respond(conn, message.CreateCustomResponse(proto.GatewayOperation_CnNodeNotificationType, &a))
+			b.respond(conn, message.CreateResponse(-1))
 		default:
 			b.respond(conn, message.CreateResponse(-1))
 		}
