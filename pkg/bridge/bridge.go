@@ -12,7 +12,6 @@ import (
 	//"github.com/hsmade/comfoconnectbridge/proto"
 
 	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
-	"github.com/hsmade/comfoconnectbridge/proto"
 )
 
 type Bridge struct {
@@ -95,9 +94,14 @@ func (b *Bridge) handleClient(conn net.Conn) error {
 	for {
 		message, err := comfoconnect.GetMessageFromSocket(conn)
 		if err != nil {
-			if err == io.EOF || err.Error() == "reading from socket: EOF" { // FIXME: why doesn't io.EOF work?
+			if err, ok := errors.Cause(err).(net.Error); ok && err.Timeout() {
+				// this is a timeout, which just means there is no data (yet)
+				continue
+			}
+
+			if errors.Cause(err) == io.EOF {
 				logrus.Warnf("client %s closed connection", conn.RemoteAddr())
-				return errors.Wrap(err, "tried to read from a closed connection")
+				return errors.Wrap(err, "tried to read from a closed connection") // FIXME: not an error?
 			}
 
 			logrus.Errorf("failed to parse this message from: %s: %v", conn.RemoteAddr(), err)
@@ -107,8 +111,8 @@ func (b *Bridge) handleClient(conn net.Conn) error {
 		logrus.Infof("got a message from: %s: %v", conn.RemoteAddr(), message)
 
 		switch message.Operation.Type.String() {
-		case "StartSessionRequestType":
-			b.respond(conn, message.CreateResponse(proto.GatewayOperation_OK))
+		//case "StartSessionRequestType":
+		//	b.respond(conn, message.CreateResponse(proto.GatewayOperation_OK))
 		default:
 			b.respond(conn, message.CreateResponse(-1))
 		}

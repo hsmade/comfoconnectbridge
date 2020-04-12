@@ -14,10 +14,10 @@ import (
 
 type BroadcastListener struct {
 	ResponseIP string
-	myMAC []byte
-	listener *net.UDPConn
-	quit chan bool
-	exited chan bool
+	myMAC      []byte
+	listener   *net.UDPConn
+	quit       chan bool
+	exited     chan bool
 }
 
 func NewBroadcastListener(ip string, mac []byte) *BroadcastListener {
@@ -33,10 +33,10 @@ func NewBroadcastListener(ip string, mac []byte) *BroadcastListener {
 
 	l := BroadcastListener{
 		ResponseIP: ip,
-		myMAC: mac,
-		listener: listener,
-		quit:     make(chan bool),
-		exited:   make(chan bool),
+		myMAC:      mac,
+		listener:   listener,
+		quit:       make(chan bool),
+		exited:     make(chan bool),
 	}
 
 	return &l
@@ -47,7 +47,7 @@ func (l *BroadcastListener) Run() {
 	var handlers sync.WaitGroup
 	for {
 		select {
-		case <- l.quit:
+		case <-l.quit:
 			logrus.Info("Shutting down tcp server")
 			l.listener.Close()
 			handlers.Wait()
@@ -86,7 +86,6 @@ func (l *BroadcastListener) Run() {
 		}
 	}
 }
-
 
 func (l *BroadcastListener) handleConnection(addr *net.UDPAddr) error {
 	logrus.Debug("writing searchGatewayResponse")

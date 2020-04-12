@@ -22,7 +22,7 @@ type Message struct {
 	src           []byte
 	dst           []byte
 	Operation     proto.GatewayOperation
-	rawMessage    []byte // FIXME: do we need this?
+	rawMessage    []byte
 	OperationType OperationType
 }
 
@@ -138,10 +138,49 @@ func (m Message) CreateResponse(status proto.GatewayOperation_GatewayResult) []b
 		return nil
 	}
 
-	// start building up the response byte slice
+	// TODO: add overrides
+	switch responseType.String() {
+	case "CnTimeConfirmType":
+		currentTime := uint32(time.Now().Sub(time.Date(2000,1,1,0,0,0,0, time.UTC)).Seconds())
+		responseStruct.(*proto.CnTimeConfirm).CurrentTime = &currentTime
+	case "StartSessionConfirmType":
+		ok := proto.GatewayOperation_OK
+		operation.Result = &ok
+	case "VersionConfirmType":
+		gw := uint32(1049610)
+		cn := uint32(1073750016)
+		serial := "DEM0116371204"
+		responseStruct.(*proto.VersionConfirm).GatewayVersion = &gw
+		responseStruct.(*proto.VersionConfirm).ComfoNetVersion = &cn
+		responseStruct.(*proto.VersionConfirm).SerialNumber = &serial
+		ok := proto.GatewayOperation_OK
+		operation.Result = &ok
+	case "GetSupportIdConfirm": // FIXME: wild guess that this is an issue
+		left := uint32((time.Hour * 2400).Seconds())
+		responseStruct.(*proto.GetSupportIdConfirm).RemainingTime = &left
+	case "GetRemoteAccessIdConfirmType": // FIXME from example
+		uuid := "7m\351\332}\322C\346\270\336^G\307\223Y\\"
+		responseStruct.(*proto.GetRemoteAccessIdConfirm).Uuid = []byte(uuid)
+	}
+
+	return m.packMessage(operation, responseStruct)
+}
+
+func (m Message) CreateCustomResponse(operationType proto.GatewayOperation_OperationType, operationTypeStruct OperationType) []byte {
+	logrus.Debugf("creating custom response for operation type: %s", reflect.TypeOf(m.OperationType).Elem().Name())
+	operation := proto.GatewayOperation{
+		Type:      &operationType,
+		Reference: m.Operation.Reference,
+		Result:    nil,
+	}
+
+	return m.packMessage(operation, operationTypeStruct)
+}
+// setup a binary message ready to send
+func (m Message) packMessage(operation proto.GatewayOperation, operationType OperationType) []byte {
 	// FIXME: add debugging
 	operationBytes, _ := operation.XXX_Marshal(nil, false)
-	operationTypeBytes, _ := responseStruct.XXX_Marshal(nil, false)
+	operationTypeBytes, _ := operationType.XXX_Marshal(nil, false)
 	response := make([]byte, 4)
 	binary.BigEndian.PutUint32(response, uint32(len(operationTypeBytes)+34+len(operationBytes))) // raw message length
 	response = append(response, m.dst...)
