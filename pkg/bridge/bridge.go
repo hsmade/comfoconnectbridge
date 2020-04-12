@@ -114,7 +114,9 @@ func (b *Bridge) handleClient(conn net.Conn) error {
 		switch message.Operation.Type.String() {
 		//case "StartSessionRequestType":
 		//	b.respond(conn, message.CreateResponse(proto.GatewayOperation_OK))
-		case "CnTimeRequestType":
+		case "StartSessionRequestType":
+			b.respond(conn, message.CreateResponse(proto.GatewayOperation_OK))
+
 			i := uint32(1)
 			mode := proto.CnNodeNotification_NODE_NORMAL
 			a := proto.CnNodeNotification{
@@ -123,8 +125,19 @@ func (b *Bridge) handleClient(conn net.Conn) error {
 				ZoneId:               &i,
 				Mode:                 &mode,
 			}
+
 			b.respond(conn, message.CreateCustomResponse(proto.GatewayOperation_CnNodeNotificationType, &a))
-			b.respond(conn, message.CreateResponse(-1))
+			i48 := uint32(48)
+			i5 := uint32(5)
+			i255 := uint32(255)
+			mode = proto.CnNodeNotification_NODE_NORMAL
+			a = proto.CnNodeNotification{
+				NodeId:               &i48,
+				ProductId:            &i5,
+				ZoneId:               &i255,
+				Mode:                 &mode,
+			}
+			b.respond(conn, message.CreateCustomResponse(proto.GatewayOperation_CnNodeNotificationType, &a))
 		default:
 			b.respond(conn, message.CreateResponse(-1))
 		}
