@@ -6,8 +6,8 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/hsmade/comfoconnectbridge/pkg/bridge"
 	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
+	"github.com/hsmade/comfoconnectbridge/pkg/mockLanC"
 )
 
 func main() {
@@ -22,7 +22,7 @@ func main() {
 	go l.Run()
 	defer l.Stop()
 
-	b := bridge.NewBridge("192.168.178.21", "")
+	b := mockLanC.NewMockLanC("192.168.178.21", "")
 	go b.Run()
 	defer b.Stop()
 

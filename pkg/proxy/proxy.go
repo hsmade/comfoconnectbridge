@@ -83,7 +83,6 @@ func (p *Proxy) Run() {
 }
 
 func (p *Proxy) copy(from, to net.Conn, wg *sync.WaitGroup) {
-	// TODO: improve with parsed reader, so we can wite complete messages to log
 	defer wg.Done()
 	for {
 

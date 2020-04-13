@@ -1,4 +1,4 @@
-package bridge
+package mockLanC
 
 import (
 	"io"
@@ -15,7 +15,7 @@ import (
 	"github.com/hsmade/comfoconnectbridge/proto"
 )
 
-type Bridge struct {
+type MockLanC struct {
 	myIP           string // IP to bind to and return with on broadcast requests
 	comfoconnectIP string
 	listener       *net.TCPListener
@@ -23,7 +23,7 @@ type Bridge struct {
 	exited         chan bool
 }
 
-func NewBridge(myIP, comfoconnectIP string) *Bridge {
+func NewMockLanC(myIP, comfoconnectIP string) *MockLanC {
 	addr, err := net.ResolveTCPAddr("tcp4", ":56747")
 	if err != nil {
 		logrus.Fatalf("failed to resolve address: %v", err)
@@ -34,7 +34,7 @@ func NewBridge(myIP, comfoconnectIP string) *Bridge {
 		logrus.Fatalf("failed to create listener: %v", err)
 	}
 
-	b := Bridge{
+	b := MockLanC{
 		myIP:           myIP,
 		comfoconnectIP: comfoconnectIP,
 		listener:       listener,
@@ -45,27 +45,27 @@ func NewBridge(myIP, comfoconnectIP string) *Bridge {
 	return &b
 }
 
-func (b *Bridge) Run() {
-	logrus.Debug("Starting new Bridge")
+func (m *MockLanC) Run() {
+	logrus.Debug("Starting new MockLanC")
 	var handlers sync.WaitGroup
 	for {
 		select {
-		case <-b.quit:
+		case <-m.quit:
 			logrus.Info("Shutting down tcp server")
-			b.listener.Close()
+			m.listener.Close()
 			handlers.Wait()
-			close(b.exited)
+			close(m.exited)
 			return
 
 		default:
-			err := b.listener.SetDeadline(time.Now().Add(time.Second * 5))
+			err := m.listener.SetDeadline(time.Now().Add(time.Second * 5))
 			if err != nil {
 				logrus.Errorf("failed to set accept deadline: %v", err)
 				continue
 			}
 
 			logrus.Debug("waiting for new connections")
-			conn, err := b.listener.Accept()
+			conn, err := m.listener.Accept()
 			if err != nil {
 				if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {
 					continue
@@ -76,7 +76,7 @@ func (b *Bridge) Run() {
 			handlers.Add(1)
 			go func() {
 				for {
-					err := b.handleClient(conn)
+					err := m.handleClient(conn)
 					if err != nil {
 						logrus.Errorf("failed to handle connection: %v", err)
 						break
@@ -88,7 +88,7 @@ func (b *Bridge) Run() {
 	}
 }
 
-func (b *Bridge) handleClient(conn net.Conn) error {
+func (m *MockLanC) handleClient(conn net.Conn) error {
 	logrus.Debugf("handling connection from %v", conn.RemoteAddr())
 	defer conn.Close()
 
@@ -113,45 +113,45 @@ func (b *Bridge) handleClient(conn net.Conn) error {
 
 		switch message.Operation.Type.String() {
 		//case "StartSessionRequestType":
-		//	b.respond(conn, message.CreateResponse(proto.GatewayOperation_OK))
+		//	m.respond(conn, message.CreateResponse(proto.GatewayOperation_OK))
 		case "StartSessionRequestType":
-			b.respond(conn, message.CreateResponse(proto.GatewayOperation_OK))
+			m.respond(conn, message.CreateResponse(proto.GatewayOperation_OK))
 
 			i := uint32(1)
 			mode := proto.CnNodeNotification_NODE_NORMAL
 			a := proto.CnNodeNotification{
-				NodeId:               &i,
-				ProductId:            &i,
-				ZoneId:               &i,
-				Mode:                 &mode,
+				NodeId:    &i,
+				ProductId: &i,
+				ZoneId:    &i,
+				Mode:      &mode,
 			}
 
-			b.respond(conn, message.CreateCustomResponse(proto.GatewayOperation_CnNodeNotificationType, &a))
+			m.respond(conn, message.CreateCustomResponse(proto.GatewayOperation_CnNodeNotificationType, &a))
 			i48 := uint32(48)
 			i5 := uint32(5)
 			i255 := uint32(255)
 			mode = proto.CnNodeNotification_NODE_NORMAL
 			a = proto.CnNodeNotification{
-				NodeId:               &i48,
-				ProductId:            &i5,
-				ZoneId:               &i255,
-				Mode:                 &mode,
+				NodeId:    &i48,
+				ProductId: &i5,
+				ZoneId:    &i255,
+				Mode:      &mode,
 			}
-			b.respond(conn, message.CreateCustomResponse(proto.GatewayOperation_CnNodeNotificationType, &a))
+			m.respond(conn, message.CreateCustomResponse(proto.GatewayOperation_CnNodeNotificationType, &a))
 		default:
-			b.respond(conn, message.CreateResponse(-1))
+			m.respond(conn, message.CreateResponse(-1))
 		}
 	}
 }
 
-func (b *Bridge) Stop() {
+func (m *MockLanC) Stop() {
 	logrus.Info("Stopping tcp server")
-	close(b.quit)
-	<-b.exited
+	close(m.quit)
+	<-m.exited
 	logrus.Info("Stopped tcp server")
 }
 
-func (b *Bridge) respond(conn net.Conn, data []byte) error {
+func (m *MockLanC) respond(conn net.Conn, data []byte) error {
 	logrus.Debugf("responding to %v with %x", conn.RemoteAddr(), data)
 	_, err := conn.Write(data)
 	// FIXME error logging
