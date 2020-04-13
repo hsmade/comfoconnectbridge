@@ -20,8 +20,8 @@ type OperationType interface { // FIXME: rename
 }
 
 type Message struct {
-	src           []byte
-	dst           []byte
+	Src           []byte
+	Dst           []byte
 	Operation     proto.GatewayOperation
 	RawMessage    []byte
 	OperationType OperationType
@@ -47,19 +47,19 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 
 	src, err := readBytes(conn, 16)
 	if err != nil {
-		logrus.Errorf("failed to read src: %v", err)
-		return Message{}, errors.Wrap(err, "reading src")
+		logrus.Errorf("failed to read Src: %v", err)
+		return Message{}, errors.Wrap(err, "reading Src")
 	}
 	completeMessage = append(completeMessage, src...)
-	logrus.Debugf("src: %x", src)
+	logrus.Debugf("Src: %x", src)
 
 	dst, err := readBytes(conn, 16)
 	if err != nil {
-		logrus.Errorf("failed to read dst: %v", err)
-		return Message{}, errors.Wrap(err, "reading dst")
+		logrus.Errorf("failed to read Dst: %v", err)
+		return Message{}, errors.Wrap(err, "reading Dst")
 	}
 	completeMessage = append(completeMessage, dst...)
-	logrus.Debugf("dst: %x", dst)
+	logrus.Debugf("Dst: %x", dst)
 
 	operationLengthBytes, err := readBytes(conn, 2)
 	if err != nil {
@@ -109,12 +109,11 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 	err = operationType.XXX_Unmarshal(operationTypeBytes)
 	if err != nil {
 		return Message{}, errors.Wrap(err, "failed to unmarshal operation type") // FIXME
-		logrus.Errorf("failed to unmarshal operation type: %v", err)
 	}
 
 	message := Message{
-		src:           src,
-		dst:           dst,
+		Src:           src,
+		Dst:           dst,
 		Operation:     operation,
 		RawMessage:    completeMessage,
 		OperationType: operationType,
@@ -145,7 +144,7 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 }
 
 func (m Message) String() string {
-	return fmt.Sprintf("src=%x; dst=%x; Cmd_type=%v; ref=%v; RawMessage=%x", m.src, m.dst, m.Operation.Type.String(), *m.Operation.Reference, m.RawMessage)
+	return fmt.Sprintf("Src=%x; Dst=%x; Cmd_type=%v; ref=%v; RawMessage=%x", m.Src, m.Dst, m.Operation.Type.String(), *m.Operation.Reference, m.RawMessage)
 }
 
 // creates the correct response message as a byte slice, for the parent message
@@ -170,7 +169,7 @@ func (m Message) CreateResponse(status proto.GatewayOperation_GatewayResult) []b
 	//overrides
 	switch responseType.String() {
 	case "CnTimeConfirmType":
-		currentTime := uint32(time.Now().Sub(time.Date(2000,1,1,0,0,0,0, time.UTC)).Seconds())
+		currentTime := uint32(time.Now().Sub(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)).Seconds())
 		responseStruct.(*proto.CnTimeConfirm).CurrentTime = &currentTime
 	case "StartSessionConfirmType":
 		ok := proto.GatewayOperation_OK
@@ -216,13 +215,14 @@ func (m Message) CreateResponse(status proto.GatewayOperation_GatewayResult) []b
 func (m Message) CreateCustomResponse(operationType proto.GatewayOperation_OperationType, operationTypeStruct OperationType) []byte {
 	logrus.Debugf("creating custom response for operation type: %s", reflect.TypeOf(operationTypeStruct).Elem().Name())
 	operation := proto.GatewayOperation{
-		Type:      &operationType,
+		Type: &operationType,
 		//Reference: m.Operation.Reference, // if we add this, we get double reference (prefixed)??
-		Result:    nil,
+		Result: nil,
 	}
 
 	return m.packMessage(operation, operationTypeStruct)
 }
+
 // setup a binary message ready to send
 func (m Message) packMessage(operation proto.GatewayOperation, operationType OperationType) []byte {
 	// FIXME: add debugging
@@ -230,8 +230,8 @@ func (m Message) packMessage(operation proto.GatewayOperation, operationType Ope
 	operationTypeBytes, _ := operationType.XXX_Marshal(nil, false)
 	response := make([]byte, 4)
 	binary.BigEndian.PutUint32(response, uint32(len(operationTypeBytes)+34+len(operationBytes))) // raw message length
-	response = append(response, m.dst...)
-	response = append(response, m.src...)
+	response = append(response, m.Dst...)
+	response = append(response, m.Src...)
 	b := make([]byte, 2)
 	binary.BigEndian.PutUint16(b, uint16(len(operationBytes))) // op length
 	response = append(response, b...)
@@ -239,6 +239,10 @@ func (m Message) packMessage(operation proto.GatewayOperation, operationType Ope
 	response = append(response, operationTypeBytes...)
 
 	return response
+}
+
+func (m Message) Encode() []byte {
+	return m.packMessage(m.Operation, m.OperationType)
 }
 
 // take an IP address, and a MAC address to respond with and create search gateway response

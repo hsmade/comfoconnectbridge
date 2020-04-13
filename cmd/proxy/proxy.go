@@ -7,7 +7,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
-	"github.com/hsmade/comfoconnectbridge/pkg/proxy"
+	"github.com/hsmade/comfoconnectbridge/pkg/testproxy"
 )
 
 func main() {
@@ -21,7 +21,7 @@ func main() {
 	go l.Run()
 	defer l.Stop()
 
-	p := proxy.NewProxy("192.168.178.2:1234")
+	p := testproxy.NewProxy("192.168.178.2:1234")
 	go p.Run()
 	defer p.Stop()
 
