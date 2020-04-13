@@ -120,6 +120,27 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 		OperationType: operationType,
 	}
 
+	switch message.Operation.Type.String() {
+	case "CnRpdoNotificationType":
+		actual := message.OperationType.(*proto.CnRpdoNotification)
+		logrus.Debugf("Received Rpdo for ppid:%d with data:%x", *actual.Pdid, actual.Data)
+	case "CnRpdoRequestType":
+		actual := message.OperationType.(*proto.CnRpdoRequest)
+		logrus.Debugf("Received Rpdo request for ppid:%d", *actual.Pdid)
+	// TODO: decode RMI data
+	case "CnRmiRequestType":
+		actual := message.OperationType.(*proto.CnRmiRequest)
+		logrus.Debugf("Received Rmi request for node:%d with data:%x", *actual.NodeId, actual.Message)
+	case "CnRmiResponseType":
+		actual := message.OperationType.(*proto.CnRmiResponse)
+		logrus.Debugf("Received Rmi response with result:%d and data:%x", *actual.Result, actual.Message)
+	case "CnRmiAsyncRequestType":
+		actual := message.OperationType.(*proto.CnRmiAsyncRequest)
+		logrus.Debugf("Received Rmi async request for node:%d and data:%x", *actual.NodeId, actual.Message)
+	case "CnRmiAsyncResponseType":
+		actual := message.OperationType.(*proto.CnRmiAsyncResponse)
+		logrus.Debugf("Received Rmi async response with result:%d and data:%x", *actual.Result, actual.Message)
+	}
 	return message, nil
 }
 
@@ -146,7 +167,7 @@ func (m Message) CreateResponse(status proto.GatewayOperation_GatewayResult) []b
 		return nil
 	}
 
-	// TODO: add overrides
+	//overrides
 	switch responseType.String() {
 	case "CnTimeConfirmType":
 		currentTime := uint32(time.Now().Sub(time.Date(2000,1,1,0,0,0,0, time.UTC)).Seconds())
@@ -154,7 +175,7 @@ func (m Message) CreateResponse(status proto.GatewayOperation_GatewayResult) []b
 	case "StartSessionConfirmType":
 		ok := proto.GatewayOperation_OK
 		operation.Result = &ok
-	case "VersionConfirmType":
+	case "VersionConfirmType": // FIXME: get this from comfoconnect
 		gw := uint32(1049610)
 		cn := uint32(1073750016)
 		serial := "DEM0116371204"
@@ -163,10 +184,7 @@ func (m Message) CreateResponse(status proto.GatewayOperation_GatewayResult) []b
 		responseStruct.(*proto.VersionConfirm).SerialNumber = &serial
 		ok := proto.GatewayOperation_OK
 		operation.Result = &ok
-	//case "GetSupportIdConfirmType": // FIXME: wild guess that this is an issue
-	//	left := uint32((time.Hour * 2400).Seconds())
-	//	responseStruct.(*proto.GetSupportIdConfirm).RemainingTime = &left
-	case "GetRemoteAccessIdConfirmType": // FIXME from example
+	case "GetRemoteAccessIdConfirmType": // FIXME: get this from comfoconnect
 		uuid := "7m\351\332}\322C\346\270\336^G\307\223Y\\"
 		responseStruct.(*proto.GetRemoteAccessIdConfirm).Uuid = []byte(uuid)
 	case "CnRmiResponseType":
