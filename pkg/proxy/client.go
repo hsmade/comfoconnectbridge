@@ -1,68 +1,98 @@
 package proxy
 
 import (
-	"fmt"
+	"io"
 	"net"
 
+	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
 	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
 )
 
 type Client struct {
-	IP         string
-	uuid       []byte
-	toRemote   chan comfoconnect.Message
-	fromRemote chan comfoconnect.Message
-	quit       chan bool
-	exited     chan bool
+	IP          string
+	uuid        []byte
+	toGateway   chan comfoconnect.Message
+	fromgateway chan comfoconnect.Message
+	quit        chan bool
+	exited      chan bool
+	session     *comfoconnect.Session
 }
 
-func NewClient(ip string, macAddress []byte) *Client {
-	_, err := net.ResolveTCPAddr("tcp4", fmt.Sprintf("%s:56747", ip))
-	if err != nil {
-		logrus.Fatalf("failed to resolve address: %v", err)
-	}
+func NewClient(ip string, macAddress []byte, toGateway chan comfoconnect.Message) *Client {
+	log := logrus.WithFields(logrus.Fields{
+		"module": "proxy",
+		"method": "NewClient",
+	})
 
 	uuid := []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x25, 0x10, 0x10, 0x80, 0x01} // uuid header
 	uuid = append(uuid, macAddress...)
 
+	log.Debugf("starting new session with gateway %s", ip)
+	session, err := comfoconnect.CreateSession(ip, 0, uuid)
+	if err != nil {
+		log.Errorf("failed to create a session with gateway %s: %v", ip, err)
+		panic(err)
+	}
+
 	return &Client{
-		IP:         ip,
-		uuid:       uuid,
-		toRemote:   make(chan comfoconnect.Message),
-		fromRemote: make(chan comfoconnect.Message),
+		IP:          ip,
+		uuid:        uuid,
+		toGateway:   toGateway,
+		fromgateway: make(chan comfoconnect.Message),
+		session:     session,
 	}
 }
 
 func (c Client) Run() error {
-	conn, err := net.Dial("tcp", fmt.Sprintf("%s:56747", c.IP))
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
+	log := logrus.WithFields(logrus.Fields{
+		"module": "proxy",
+		"object": "Client",
+		"method": "Run",
+	})
 
-	// register app
-	// read message until response, check response
-	// create session
-	// read message until response, check response
-	// for each PDO
-	//     request PDO
-	//     read message until response, check response
-
+	log.Info("starting")
 	for {
 		select {
 		case <-c.quit:
-			logrus.Info("Shutting down tcp server")
-			conn.Close()
+			log.Info("Shutting down")
+			c.session.Close()
 			close(c.exited)
 			return nil
 
-		case m := <-c.toRemote:
-			conn.Write(m.Encode())
+		case m := <-c.toGateway:
+			log.Debugf("sending message to gateway: %v", m)
+			c.session.Send(m)
 		default:
-			m, err := comfoconnect.GetMessageFromSocket(conn)
-			c.fromRemote <- m
+			log.Debug("waiting for message from gateway")
+			m, err := c.session.Receive()
+			if err != nil {
+				if errors.Cause(err) == io.EOF {
+					log.Warn("gateway closed connection")
+					return errors.Wrap(err, "lost connection to gateway")
+				}
+				if errors.Cause(err).(*net.OpError).Timeout() {
+					break // Receive() sets a timeout, so this loop can keep running
+				}
+				log.Errorf("got error while receiving from gateway: %v", err)
+				break // restart loop
+			}
+			log.Debugf("received message from gateway: %v", m)
+			c.fromgateway <- m
 		}
 	}
+}
+
+func (c *Client) Stop() {
+	log := logrus.WithFields(logrus.Fields{
+		"module": "proxy",
+		"object": "Client",
+		"method": "Stop",
+	})
+
+	log.Debug("Stopping")
+	close(c.quit)
+	<-c.exited
+	log.Info("Stopped")
 }

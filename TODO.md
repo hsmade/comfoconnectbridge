@@ -18,15 +18,16 @@ TODO
  * [ ] write tests for pkg/comfoconnect/*
  
  * [ ] design proxy/bridge that:
-   * is a server to the app, handles registrations and sessions
-   * forwards all other requests from the app to Lan-c with the uuid of our own client (fan-in)
-   * copies all answers from lan-c to all connected apps (fan-out)
-   * is half a client to lan-c, requesting updates for every known PDO
-   * keeps metrics for all see traffic per operation type
-   * keep metrics for all PDOs received from Lan-c
+   * [X] is a server to the app, handles registrations and sessions
+   * [X] forwards all other requests from the app to the gateway with the uuid of our own client (fan-in)
+   * [X] copies all answers from the gateway to all connected apps (fan-out)
+   * [ ] is half a client to the gateway, requesting updates for every known PDO
+   * [ ] sends keep alive messages to the gateway
+   * [ ] keeps metrics for all see traffic per operation type
+   * [ ] keep metrics for all PDOs received from the gateway
    
    
-       app -> [ => decode, metrics, encode with us as src                   => ] -> lan-c
+       app -> [ => decode, metrics, encode with us as src                   => ] -> the gateway
            /  [ <= encode ,duplicate per app + replace dst, metrics, decode <= ]
           |    
        internal-client

@@ -58,7 +58,7 @@ func (m *MockLanC) Run() {
 			return
 
 		default:
-			err := m.listener.SetDeadline(time.Now().Add(time.Second * 5))
+			err := m.listener.SetDeadline(time.Now().Add(time.Second * 1))
 			if err != nil {
 				logrus.Errorf("failed to set accept deadline: %v", err)
 				continue

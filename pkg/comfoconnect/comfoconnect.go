@@ -28,11 +28,16 @@ type Message struct {
 }
 
 func GetMessageFromSocket(conn net.Conn) (Message, error) {
+	log := logrus.WithFields(logrus.Fields{
+		"module": "comfoconnect",
+		"method": "GetMessageFromSocket",
+	})
+
 	var completeMessage []byte
 
 	lengthBytes, err := readBytes(conn, 4)
 	if err != nil {
-		logrus.Errorf("failed to read message length int: %v", err)
+		log.Errorf("failed to read message length int: %v", err)
 		return Message{}, errors.Wrap(err, "reading message length")
 	}
 	completeMessage = append(completeMessage, lengthBytes...)
@@ -40,30 +45,30 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 
 	if length < 0 || length > 1024 {
 		msg := fmt.Sprintf("got invalid length: %d", length)
-		logrus.Debug(msg)
+		log.Debug(msg)
 		return Message{}, errors.New(msg)
 	}
-	logrus.Debugf("length: %d", length)
+	log.Debugf("length: %d", length)
 
 	src, err := readBytes(conn, 16)
 	if err != nil {
-		logrus.Errorf("failed to read Src: %v", err)
+		log.Errorf("failed to read Src: %v", err)
 		return Message{}, errors.Wrap(err, "reading Src")
 	}
 	completeMessage = append(completeMessage, src...)
-	logrus.Debugf("Src: %x", src)
+	log.Debugf("Src: %x", src)
 
 	dst, err := readBytes(conn, 16)
 	if err != nil {
-		logrus.Errorf("failed to read Dst: %v", err)
+		log.Errorf("failed to read Dst: %v", err)
 		return Message{}, errors.Wrap(err, "reading Dst")
 	}
 	completeMessage = append(completeMessage, dst...)
-	logrus.Debugf("Dst: %x", dst)
+	log.Debugf("Dst: %x", dst)
 
 	operationLengthBytes, err := readBytes(conn, 2)
 	if err != nil {
-		logrus.Errorf("failed to read operation length int: %v", err)
+		log.Errorf("failed to read operation length int: %v", err)
 		return Message{}, errors.Wrap(err, "reading operation length")
 	}
 	completeMessage = append(completeMessage, operationLengthBytes...)
@@ -72,31 +77,31 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 
 	if operationLength < 1 || operationLength > 1024 {
 		msg := fmt.Sprintf("got invalid operationLength: %d", operationLength)
-		logrus.Debug(msg)
+		log.Debug(msg)
 		return Message{}, errors.New(msg)
 	}
-	logrus.Debugf("operationLength: %d", operationLength)
+	log.Debugf("operationLength: %d", operationLength)
 
 	operationBytes, err := readBytes(conn, int(operationLength))
 	if err != nil {
-		logrus.Errorf("failed to read operation: %v", err)
+		log.Errorf("failed to read operation: %v", err)
 		return Message{}, errors.Wrap(err, "reading operation")
 	}
 	completeMessage = append(completeMessage, operationBytes...)
-	logrus.Debugf("operationBytes: %x", operationBytes)
+	log.Debugf("operationBytes: %x", operationBytes)
 
 	operationTypeLength := (length - 34) - uint32(operationLength)
 	var operationTypeBytes []byte
 
 	if operationTypeLength > 0 {
-		logrus.Debugf("operationTypeLength: %d", operationTypeLength)
+		log.Debugf("operationTypeLength: %d", operationTypeLength)
 		operationTypeBytes, err = readBytes(conn, int(operationTypeLength))
 		if err != nil {
-			logrus.Errorf("failed to read operationTypeBytes: %v", err)
+			log.Errorf("failed to read operationTypeBytes: %v", err)
 			return Message{}, errors.Wrap(err, "reading operation type")
 		}
 		completeMessage = append(completeMessage, operationTypeBytes...)
-		logrus.Debugf("operationTypeBytes: %x", operationTypeBytes)
+		log.Debugf("operationTypeBytes: %x", operationTypeBytes)
 	}
 
 	operation := proto.GatewayOperation{} // FIXME: parse instead of assume
@@ -108,6 +113,7 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 	operationType := getStructForType(operation.Type.String())
 	err = operationType.XXX_Unmarshal(operationTypeBytes)
 	if err != nil {
+		log.Errorf("failed to unmarshal operation type for operation=%v and bytes:%x coming from src=%x and remote=%s", operation.Type.String(), operationTypeBytes, src, conn.RemoteAddr().String())
 		return Message{}, errors.Wrap(err, "failed to unmarshal operation type") // FIXME
 	}
 
@@ -122,23 +128,23 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 	switch message.Operation.Type.String() {
 	case "CnRpdoNotificationType":
 		actual := message.OperationType.(*proto.CnRpdoNotification)
-		logrus.Debugf("Received Rpdo for ppid:%d with data:%x", *actual.Pdid, actual.Data)
+		log.Debugf("Received Rpdo for ppid:%d with data:%x", *actual.Pdid, actual.Data)
 	case "CnRpdoRequestType":
 		actual := message.OperationType.(*proto.CnRpdoRequest)
-		logrus.Debugf("Received Rpdo request for ppid:%d", *actual.Pdid)
-	// TODO: decode RMI data
+		log.Debugf("Received Rpdo request for ppid:%d", *actual.Pdid)
+	// TODO: decode RMI data ?
 	case "CnRmiRequestType":
 		actual := message.OperationType.(*proto.CnRmiRequest)
-		logrus.Debugf("Received Rmi request for node:%d with data:%x", *actual.NodeId, actual.Message)
+		log.Debugf("Received Rmi request for node:%d with data:%x", *actual.NodeId, actual.Message)
 	case "CnRmiResponseType":
 		actual := message.OperationType.(*proto.CnRmiResponse)
-		logrus.Debugf("Received Rmi response with result:%d and data:%x", *actual.Result, actual.Message)
+		log.Debugf("Received Rmi response with result:%d and data:%x", *actual.Result, actual.Message)
 	case "CnRmiAsyncRequestType":
 		actual := message.OperationType.(*proto.CnRmiAsyncRequest)
-		logrus.Debugf("Received Rmi async request for node:%d and data:%x", *actual.NodeId, actual.Message)
+		log.Debugf("Received Rmi async request for node:%d and data:%x", *actual.NodeId, actual.Message)
 	case "CnRmiAsyncResponseType":
 		actual := message.OperationType.(*proto.CnRmiAsyncResponse)
-		logrus.Debugf("Received Rmi async response with result:%d and data:%x", *actual.Result, actual.Message)
+		log.Debugf("Received Rmi async response with result:%d and data:%x", *actual.Result, actual.Message)
 	}
 	return message, nil
 }
@@ -149,7 +155,13 @@ func (m Message) String() string {
 
 // creates the correct response message as a byte slice, for the parent message
 func (m Message) CreateResponse(status proto.GatewayOperation_GatewayResult) []byte {
-	logrus.Debugf("creating response for operation type: %s", reflect.TypeOf(m.OperationType).Elem().Name())
+	log := logrus.WithFields(logrus.Fields{
+		"module": "comfoconnect",
+		"object": "Message",
+		"method": "CreateResponse",
+	})
+
+	log.Debugf("creating response for operation type: %s", reflect.TypeOf(m.OperationType).Elem().Name())
 	responseType := getResponseTypeForOperationType(m.OperationType)
 	operation := proto.GatewayOperation{
 		Type:      &responseType,
@@ -162,7 +174,7 @@ func (m Message) CreateResponse(status proto.GatewayOperation_GatewayResult) []b
 
 	responseStruct := getStructForType(responseType.String())
 	if responseStruct == nil {
-		logrus.Errorf("unable to find struct for type: %s", responseType.String())
+		log.Errorf("unable to find struct for type: %s", responseType.String())
 		return nil
 	}
 
@@ -188,7 +200,7 @@ func (m Message) CreateResponse(status proto.GatewayOperation_GatewayResult) []b
 		responseStruct.(*proto.GetRemoteAccessIdConfirm).Uuid = []byte(uuid)
 	case "CnRmiResponseType":
 		request := m.OperationType.(*proto.CnRmiRequest).Message
-		logrus.Debugf("Responding to CnRmiRequest(%x)", request)
+		log.Debugf("Responding to CnRmiRequest(%x)", request)
 		// first request TODO: replace with actual call to comfoconnect
 		if bytes.Compare(request, []byte{0x02, 0x01, 0x01, 0x01, 0x15, 0x03, 0x04, 0x06, 0x05, 0x07}) == 0 {
 			responseData := []byte{0x02, 0x42, 0x45, 0x41, 0x30, 0x30, 0x34, 0x31, 0x38, 0x35, 0x30, 0x33, 0x31, 0x39, 0x31, 0x30, 0x00, 0x00, 0x10, 0x10, 0xc0, 0x02, 0x00, 0x54, 0x10, 0x40}
@@ -213,11 +225,17 @@ func (m Message) CreateResponse(status proto.GatewayOperation_GatewayResult) []b
 }
 
 func (m Message) CreateCustomResponse(operationType proto.GatewayOperation_OperationType, operationTypeStruct OperationType) []byte {
-	logrus.Debugf("creating custom response for operation type: %s", reflect.TypeOf(operationTypeStruct).Elem().Name())
+	log := logrus.WithFields(logrus.Fields{
+		"module": "comfoconnect",
+		"object": "Message",
+		"method": "CreateCustomResponse",
+	})
+
+	log.Debugf("creating custom response for operation type: %s", reflect.TypeOf(operationTypeStruct).Elem().Name())
 	operation := proto.GatewayOperation{
-		Type: &operationType,
-		//Reference: m.Operation.Reference, // if we add this, we get double reference (prefixed)??
-		Result: nil,
+		Type:      &operationType,
+		Reference: m.Operation.Reference, // if we add this, we get double reference (prefixed)??
+		Result:    nil,
 	}
 
 	return m.packMessage(operation, operationTypeStruct)
@@ -225,15 +243,24 @@ func (m Message) CreateCustomResponse(operationType proto.GatewayOperation_Opera
 
 // setup a binary message ready to send
 func (m Message) packMessage(operation proto.GatewayOperation, operationType OperationType) []byte {
-	// FIXME: add debugging
+	log := logrus.WithFields(logrus.Fields{
+		"module": "comfoconnect",
+		"object": "Message",
+		"method": "packMessage",
+	})
+
 	operationBytes, _ := operation.XXX_Marshal(nil, false)
+	log.Debugf("operationBytes: %x", operationBytes)
 	operationTypeBytes, _ := operationType.XXX_Marshal(nil, false)
+	log.Debugf("operationTypeBytes: %x", operationTypeBytes)
 	response := make([]byte, 4)
 	binary.BigEndian.PutUint32(response, uint32(len(operationTypeBytes)+34+len(operationBytes))) // raw message length
+	log.Debugf("length: %x", response)
 	response = append(response, m.Dst...)
 	response = append(response, m.Src...)
 	b := make([]byte, 2)
 	binary.BigEndian.PutUint16(b, uint16(len(operationBytes))) // op length
+	log.Debugf("op length: %x", b)
 	response = append(response, b...)
 	response = append(response, operationBytes...) // gatewayOperation
 	response = append(response, operationTypeBytes...)
@@ -266,6 +293,11 @@ func CreateSearchGatewayResponse(ipAddress string, macAddress []byte) []byte {
 
 // takes the name for an operation type and finds the struct for it
 func getStructForType(operationTypeString string) OperationType {
+	log := logrus.WithFields(logrus.Fields{
+		"module": "comfoconnect",
+		"method": "getStructForType",
+	})
+
 	var operationType OperationType
 	switch operationTypeString {
 	case "SetAddressRequestType":
@@ -401,15 +433,20 @@ func getStructForType(operationTypeString string) OperationType {
 	}
 
 	if operationType == nil {
-		logrus.Errorf("unable to find matching struct for operation type: %s", operationTypeString)
+		log.Errorf("unable to find matching struct for operation type: %s", operationTypeString)
 	} else {
-		logrus.Debugf("found struct: %s, for operation type:%s", reflect.TypeOf(operationType).Elem().Name(), operationTypeString)
+		log.Debugf("found struct: %s, for operation type:%s", reflect.TypeOf(operationType).Elem().Name(), operationTypeString)
 	}
 	return operationType
 }
 
 // takes an operation type and finds the correct response type
 func getResponseTypeForOperationType(operationType OperationType) proto.GatewayOperation_OperationType {
+	log := logrus.WithFields(logrus.Fields{
+		"module": "comfoconnect",
+		"method": "getResponseTypeForOperationType",
+	})
+
 	var responseTypeString proto.GatewayOperation_OperationType
 	operationTypeString := reflect.TypeOf(operationType).Elem().Name()
 
@@ -471,20 +508,25 @@ func getResponseTypeForOperationType(operationType OperationType) proto.GatewayO
 	}
 
 	if responseTypeString == 0 {
-		logrus.Errorf("unable to find response type for operation type: %s", operationTypeString)
+		log.Errorf("unable to find response type for operation type: %s", operationTypeString)
 	} else {
-		logrus.Debugf("found response type: %s for operation type: %s", responseTypeString, operationTypeString)
+		log.Debugf("found response type: %s for operation type: %s", responseTypeString, operationTypeString)
 	}
 	return responseTypeString
 }
 
 func readBytes(conn net.Conn, size int) ([]byte, error) {
+	log := logrus.WithFields(logrus.Fields{
+		"module": "comfoconnect",
+		"method": "readBytes",
+	})
+
 	var result []byte
 	for {
-		err := conn.SetReadDeadline(time.Now().Add(time.Second * 5))
-		if err != nil {
-			return nil, errors.Wrap(err, "setting timeout for read")
-		}
+		//err := conn.SetReadDeadline(time.Now().Add(time.Second * 1))
+		//if err != nil {
+		//	return nil, errors.Wrap(err, "setting timeout for read")
+		//}
 
 		buffer := make([]byte, size)
 		readLen, err := conn.Read(buffer)
@@ -495,10 +537,15 @@ func readBytes(conn net.Conn, size int) ([]byte, error) {
 		if readLen > 0 {
 			size -= readLen
 			result = append(result, buffer[:readLen]...)
+			log.Debugf("read result now: %x, read bytes:%d", result, readLen)
 		}
 
-		if size <= 0 {
+		if size == 0 {
 			break
+		}
+
+		if size < 0 {
+			return nil, errors.New("read too many bytes: size")
 		}
 	}
 	return result, nil

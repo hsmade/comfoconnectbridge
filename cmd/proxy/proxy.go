@@ -3,16 +3,21 @@ package main
 import (
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
 	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
-	"github.com/hsmade/comfoconnectbridge/pkg/testproxy"
+	"github.com/hsmade/comfoconnectbridge/pkg/proxy"
 )
 
 func main() {
 	logrus.SetLevel(logrus.DebugLevel)
 	//logrus.SetReportCaller(true)
+	customFormatter := new(logrus.TextFormatter)
+	customFormatter.TimestampFormat = time.StampMilli
+	logrus.SetFormatter(customFormatter)
+	customFormatter.FullTimestamp = true
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
@@ -21,7 +26,7 @@ func main() {
 	go l.Run()
 	defer l.Stop()
 
-	p := testproxy.NewProxy("192.168.178.2:1234")
+	p := proxy.NewProxy("192.168.178.21", []byte{0x70, 0x85, 0xc2, 0xb7, 0x8c, 0xa0})
 	go p.Run()
 	defer p.Stop()
 

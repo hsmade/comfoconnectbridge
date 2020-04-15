@@ -18,20 +18,25 @@ type BroadcastListener struct {
 	exited     chan bool
 }
 
-func NewBroadcastListener(ip string, mac []byte) *BroadcastListener {
+func NewBroadcastListener(myIP string, myMacAddress []byte) *BroadcastListener {
+	log := logrus.WithFields(logrus.Fields{
+		"module": "proxy",
+		"method": "NewBroadcastListener",
+	})
+
 	addr, err := net.ResolveUDPAddr("udp4", ":56747")
 	if err != nil {
-		logrus.Fatalf("failed to resolve address: %v", err)
+		log.Fatalf("failed to resolve address: %v", err)
 	}
 
 	listener, err := net.ListenUDP("udp4", addr)
 	if err != nil {
-		logrus.Fatalf("failed to create listener: %v", err)
+		log.Fatalf("failed to create listener: %v", err)
 	}
 
 	l := BroadcastListener{
-		ResponseIP: ip,
-		myMAC:      mac,
+		ResponseIP: myIP,
+		myMAC:      myMacAddress,
 		listener:   listener,
 		quit:       make(chan bool),
 		exited:     make(chan bool),
@@ -41,12 +46,18 @@ func NewBroadcastListener(ip string, mac []byte) *BroadcastListener {
 }
 
 func (l *BroadcastListener) Run() {
-	logrus.Debug("Starting new BroadcastListener")
+	log := logrus.WithFields(logrus.Fields{
+		"module": "proxy",
+		"object": "BroadcastListener",
+		"method": "Run",
+	})
+
+	log.Debug("Starting")
 	var handlers sync.WaitGroup
 	for {
 		select {
 		case <-l.quit:
-			logrus.Info("Shutting down tcp server")
+			log.Info("Shutting down")
 			l.listener.Close()
 			handlers.Wait()
 			close(l.exited)
@@ -55,28 +66,28 @@ func (l *BroadcastListener) Run() {
 		default:
 			err := l.listener.SetReadDeadline(time.Now().Add(time.Second * 5))
 			if err != nil {
-				logrus.Errorf("failed to set read deadline: %v", err)
+				log.Errorf("failed to set read deadline: %v", err)
 				continue
 			}
 
 			b := make([]byte, 2)
-			logrus.Debug("waiting for UDP broadcast")
+			log.Debug("waiting for UDP broadcast")
 			_, addr, err := l.listener.ReadFromUDP(b)
 			if err != nil {
 				if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {
 					continue
 				}
-				logrus.Errorf("failed to accept connection: %v", err)
+				log.Errorf("failed to accept connection: %v", err)
 				continue
 			}
-			logrus.Debugf("Received: %v from %v", b, addr.String())
+			log.Debugf("Received: %v from %v", b, addr.String())
 
 			if addr != nil {
 				handlers.Add(1)
 				go func() {
 					err := l.handleConnection(addr)
 					if err != nil {
-						logrus.Errorf("failed to handle connection: %v", err)
+						log.Errorf("failed to handle connection: %v", err)
 					}
 					handlers.Done()
 				}()
@@ -86,18 +97,30 @@ func (l *BroadcastListener) Run() {
 }
 
 func (l *BroadcastListener) handleConnection(addr *net.UDPAddr) error {
-	logrus.Debug("writing searchGatewayResponse")
+	log := logrus.WithFields(logrus.Fields{
+		"module": "proxy",
+		"object": "BroadcastListener",
+		"method": "handleConnection",
+	})
+
+	log.Debug("writing searchGatewayResponse")
 	_, err := l.listener.WriteToUDP(CreateSearchGatewayResponse(l.ResponseIP, l.myMAC), addr)
 	if err != nil {
-		logrus.Errorf("Failed to respond to SearchGatewayRequest: %v", err)
+		log.Errorf("Failed to respond to SearchGatewayRequest: %v", err)
 		return errors.Wrap(err, "responding to SearchGatewayRequest")
 	}
 	return nil
 }
 
 func (l *BroadcastListener) Stop() {
-	logrus.Info("Stopping udp listener")
+	log := logrus.WithFields(logrus.Fields{
+		"module": "proxy",
+		"object": "BroadcastListener",
+		"method": "Stop",
+	})
+
+	log.Debugf("Stopping")
 	close(l.quit)
 	<-l.exited
-	logrus.Info("Stopped udp listener")
+	log.Info("Stopped")
 }

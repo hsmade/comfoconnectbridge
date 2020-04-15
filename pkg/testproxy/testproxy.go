@@ -52,7 +52,7 @@ func (p *Proxy) Run() {
 			return
 
 		default:
-			err := p.listener.SetDeadline(time.Now().Add(time.Second * 5))
+			err := p.listener.SetDeadline(time.Now().Add(time.Second * 1))
 			if err != nil {
 				logrus.Errorf("failed to set read deadline: %v", err)
 				continue
@@ -103,16 +103,16 @@ func (p *Proxy) copy(from, to net.Conn, wg *sync.WaitGroup) {
 
 func (p *Proxy) handleClient(conn net.Conn) error {
 	defer conn.Close()
-	comfoconnect, err := net.Dial("tcp", p.ComfoConnect)
+	remote, err := net.Dial("tcp", p.ComfoConnect)
 	if err != nil {
 		return err
 	}
-	defer comfoconnect.Close()
+	defer remote.Close()
 
 	wg := &sync.WaitGroup{}
 	wg.Add(2)
-	go p.copy(comfoconnect, conn, wg)
-	go p.copy(conn, comfoconnect, wg)
+	go p.copy(remote, conn, wg)
+	go p.copy(conn, remote, wg)
 	wg.Wait()
 
 	return nil

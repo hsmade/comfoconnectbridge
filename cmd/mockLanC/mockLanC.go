@@ -3,16 +3,22 @@ package main
 import (
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
 	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
+	//"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
 	"github.com/hsmade/comfoconnectbridge/pkg/mockLanC"
 )
 
 func main() {
 	logrus.SetLevel(logrus.DebugLevel)
 	//logrus.SetReportCaller(true)
+	customFormatter := new(logrus.TextFormatter)
+	customFormatter.TimestampFormat = time.StampMilli
+	logrus.SetFormatter(customFormatter)
+	customFormatter.FullTimestamp = true
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
