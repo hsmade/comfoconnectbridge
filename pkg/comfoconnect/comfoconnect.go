@@ -37,6 +37,10 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 
 	lengthBytes, err := readBytes(conn, 4)
 	if err != nil {
+		if opErr, ok := errors.Cause(err).(*net.OpError); ok && opErr.Timeout() {
+			// read timeout, silently ignore
+			return Message{}, err
+		}
 		log.Errorf("failed to read message length int: %v", err)
 		return Message{}, errors.Wrap(err, "reading message length")
 	}
@@ -45,10 +49,10 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 
 	if length < 0 || length > 1024 {
 		msg := fmt.Sprintf("got invalid length: %d", length)
-		log.Debug(msg)
+		log.Trace(msg)
 		return Message{}, errors.New(msg)
 	}
-	log.Debugf("length: %d", length)
+	log.Trace("length: %d", length)
 
 	src, err := readBytes(conn, 16)
 	if err != nil {
@@ -56,7 +60,7 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 		return Message{}, errors.Wrap(err, "reading Src")
 	}
 	completeMessage = append(completeMessage, src...)
-	log.Debugf("Src: %x", src)
+	log.Trace("Src: %x", src)
 
 	dst, err := readBytes(conn, 16)
 	if err != nil {
@@ -64,7 +68,7 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 		return Message{}, errors.Wrap(err, "reading Dst")
 	}
 	completeMessage = append(completeMessage, dst...)
-	log.Debugf("Dst: %x", dst)
+	log.Trace("Dst: %x", dst)
 
 	operationLengthBytes, err := readBytes(conn, 2)
 	if err != nil {
@@ -77,10 +81,10 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 
 	if operationLength < 1 || operationLength > 1024 {
 		msg := fmt.Sprintf("got invalid operationLength: %d", operationLength)
-		log.Debug(msg)
+		log.Trace(msg)
 		return Message{}, errors.New(msg)
 	}
-	log.Debugf("operationLength: %d", operationLength)
+	log.Trace("operationLength: %d", operationLength)
 
 	operationBytes, err := readBytes(conn, int(operationLength))
 	if err != nil {
@@ -88,20 +92,20 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 		return Message{}, errors.Wrap(err, "reading operation")
 	}
 	completeMessage = append(completeMessage, operationBytes...)
-	log.Debugf("operationBytes: %x", operationBytes)
+	log.Trace("operationBytes: %x", operationBytes)
 
 	operationTypeLength := (length - 34) - uint32(operationLength)
 	var operationTypeBytes []byte
 
 	if operationTypeLength > 0 {
-		log.Debugf("operationTypeLength: %d", operationTypeLength)
+		log.Trace("operationTypeLength: %d", operationTypeLength)
 		operationTypeBytes, err = readBytes(conn, int(operationTypeLength))
 		if err != nil {
 			log.Errorf("failed to read operationTypeBytes: %v", err)
 			return Message{}, errors.Wrap(err, "reading operation type")
 		}
 		completeMessage = append(completeMessage, operationTypeBytes...)
-		log.Debugf("operationTypeBytes: %x", operationTypeBytes)
+		log.Trace("operationTypeBytes: %x", operationTypeBytes)
 	}
 
 	operation := proto.GatewayOperation{} // FIXME: parse instead of assume
@@ -250,17 +254,17 @@ func (m Message) packMessage(operation proto.GatewayOperation, operationType Ope
 	})
 
 	operationBytes, _ := operation.XXX_Marshal(nil, false)
-	log.Debugf("operationBytes: %x", operationBytes)
+	log.Trace("operationBytes: %x", operationBytes)
 	operationTypeBytes, _ := operationType.XXX_Marshal(nil, false)
-	log.Debugf("operationTypeBytes: %x", operationTypeBytes)
+	log.Trace("operationTypeBytes: %x", operationTypeBytes)
 	response := make([]byte, 4)
 	binary.BigEndian.PutUint32(response, uint32(len(operationTypeBytes)+34+len(operationBytes))) // raw message length
-	log.Debugf("length: %x", response)
+	log.Trace("length: %x", response)
 	response = append(response, m.Dst...)
 	response = append(response, m.Src...)
 	b := make([]byte, 2)
 	binary.BigEndian.PutUint16(b, uint16(len(operationBytes))) // op length
-	log.Debugf("op length: %x", b)
+	log.Trace("op length: %x", b)
 	response = append(response, b...)
 	response = append(response, operationBytes...) // gatewayOperation
 	response = append(response, operationTypeBytes...)
@@ -537,7 +541,7 @@ func readBytes(conn net.Conn, size int) ([]byte, error) {
 		if readLen > 0 {
 			size -= readLen
 			result = append(result, buffer[:readLen]...)
-			log.Debugf("read result now: %x, read bytes:%d", result, readLen)
+			log.Trace("read result now: %x, read bytes:%d", result, readLen)
 		}
 
 		if size == 0 {

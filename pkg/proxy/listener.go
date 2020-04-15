@@ -72,7 +72,7 @@ func (l *Listener) Run() {
 				continue
 			}
 
-			log.Debug("waiting for new connections")
+			// log.Debug("waiting for new connections")
 			conn, err := l.listener.Accept()
 			if err != nil {
 				if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {
@@ -126,7 +126,7 @@ func (a *App) HandleConnection(gateway chan comfoconnect.Message) error {
 
 	for {
 		//read message
-		a.conn.SetDeadline(time.Now().Add(time.Second * 1))
+		a.conn.SetReadDeadline(time.Now().Add(time.Second * 1))
 		message, err := comfoconnect.GetMessageFromSocket(a.conn)
 		if err != nil {
 			if errors.Cause(err) == io.EOF {
@@ -135,7 +135,7 @@ func (a *App) HandleConnection(gateway chan comfoconnect.Message) error {
 			// FIXME: log error, ignore timeout
 			continue
 		}
-		log.Debugf("got a message from client(%s): %v", a.conn.RemoteAddr(), message)
+		log.Debugf("got a message from app(%s): %v", a.conn.RemoteAddr(), message)
 
 		switch message.Operation.Type.String() {
 		case "RegisterAppRequestType":

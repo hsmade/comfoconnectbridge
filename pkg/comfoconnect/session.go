@@ -2,6 +2,7 @@ package comfoconnect
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"time"
 
@@ -113,16 +114,55 @@ func CreateSession(comfoConnectIP string, pin uint32, src []byte) (*Session, err
 		return nil, errors.New(fmt.Sprintf("received invalid message type instead of StartSessionConfirmType: %v", m.String()))
 	}
 
-	// FIXME: TODO: go func for keepalive
-
-	return &Session{
+	s := Session{
 		IP:   comfoConnectIP,
 		Src:  src,
 		Dst:  dst,
 		Conn: conn,
-	}, nil
+	}
+
+	go s.keepAlive()
+	return &s, nil
 }
 
+func (s *Session) keepAlive() {
+	log := logrus.WithFields(logrus.Fields{
+		"module": "comfoconnect",
+		"object": "Session",
+		"method": "keepAlive",
+	})
+
+	ticker := time.NewTicker(5 * time.Second)
+	reference := uint32(50)
+	for {
+		select {
+		case <-ticker.C:
+			log.Debug("sending keep alive")
+			operationType := proto.GatewayOperation_CnTimeRequestType
+			m := Message{
+				Src:           s.Src,
+				Dst:           s.Dst,
+				Operation:     proto.GatewayOperation{
+					Type: &operationType,
+					Reference: &reference,
+				},
+				OperationType: &proto.CnTimeRequest{},
+			}
+			_, err := s.Conn.Write(m.Encode())
+			if err != nil {
+				if errors.Cause(err) == io.EOF {
+					log.Debug("Connection closed, stopping keepalives")
+					return
+				}
+				log.Errorf("keepalive got error: %v", err)
+			}
+			reference ++
+			if reference > 1024 {
+				reference = 1
+			}
+		}
+	}
+}
 // send a UDP packet to `ip` and expect a searchGatewayResponse with the uuid
 func discoverGateway(ip string) (uuid []byte, err error) {
 	log := logrus.WithFields(logrus.Fields{
@@ -143,7 +183,7 @@ func discoverGateway(ip string) (uuid []byte, err error) {
 	}
 	defer conn.Close()
 
-	conn.SetDeadline(time.Time{})
+	//conn.SetReadDeadline(time.Time{})
 
 	_, err = conn.Write([]byte{0x0a, 0x00}) // wake up gateway
 	if err != nil {
@@ -190,7 +230,7 @@ func (s *Session) Close() {
 }
 
 func (s *Session) Receive() (Message, error) {
-	s.Conn.SetDeadline(time.Now().Add(time.Second * 1))
+	s.Conn.SetReadDeadline(time.Now().Add(time.Second * 1))
 	return GetMessageFromSocket(s.Conn)
 }
 

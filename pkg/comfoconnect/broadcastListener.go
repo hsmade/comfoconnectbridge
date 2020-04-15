@@ -71,7 +71,7 @@ func (l *BroadcastListener) Run() {
 			}
 
 			b := make([]byte, 2)
-			log.Debug("waiting for UDP broadcast")
+			//log.Debug("waiting for UDP broadcast")
 			_, addr, err := l.listener.ReadFromUDP(b)
 			if err != nil {
 				if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {

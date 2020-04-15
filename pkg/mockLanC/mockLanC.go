@@ -64,7 +64,7 @@ func (m *MockLanC) Run() {
 				continue
 			}
 
-			logrus.Debug("waiting for new connections")
+			// logrus.Debug("waiting for new connections")
 			conn, err := m.listener.Accept()
 			if err != nil {
 				if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {

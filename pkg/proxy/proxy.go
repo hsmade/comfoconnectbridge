@@ -66,12 +66,16 @@ func (p Proxy) Run() {
 			message.Src = p.uuid
 			log.Debugf("forwarding message to gateway: %v", message)
 			p.client.toGateway <- message
-		case message := <-p.client.fromgateway:
+		case message := <-p.client.fromGateway:
 			log.Debugf("received a message from gateway: %v", message)
 			generateMetrics(message)
 			for _, app := range p.listener.apps {
+				log.Debugf("copying message from gateway to app(%s/%x):%v", app.conn.RemoteAddr().String(), app.uuid)
 				message.Dst = app.uuid
-				app.Write(message)
+				err := app.Write(message)
+				if err != nil {
+					log.Errorf("error while copying message from gateway to app(%s/%x):%v", app.conn.RemoteAddr().String(), app.uuid, err)
+				}
 			}
 		}
 	}

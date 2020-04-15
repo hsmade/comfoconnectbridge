@@ -58,7 +58,7 @@ func (p *Proxy) Run() {
 				continue
 			}
 
-			logrus.Debug("waiting for new connections")
+			// logrus.Debug("waiting for new connections")
 			conn, err := p.listener.Accept()
 			if err != nil {
 				if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {

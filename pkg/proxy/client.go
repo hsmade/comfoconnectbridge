@@ -14,7 +14,7 @@ type Client struct {
 	IP          string
 	uuid        []byte
 	toGateway   chan comfoconnect.Message
-	fromgateway chan comfoconnect.Message
+	fromGateway chan comfoconnect.Message
 	quit        chan bool
 	exited      chan bool
 	session     *comfoconnect.Session
@@ -40,7 +40,7 @@ func NewClient(ip string, macAddress []byte, toGateway chan comfoconnect.Message
 		IP:          ip,
 		uuid:        uuid,
 		toGateway:   toGateway,
-		fromgateway: make(chan comfoconnect.Message),
+		fromGateway: make(chan comfoconnect.Message),
 		session:     session,
 	}
 }
@@ -63,7 +63,10 @@ func (c Client) Run() error {
 
 		case m := <-c.toGateway:
 			log.Debugf("sending message to gateway: %v", m)
-			c.session.Send(m)
+			err := c.session.Send(m)
+			if err != nil {
+				log.Errorf("sending message to gateway failed: %v", err)
+			}
 		default:
 			log.Debug("waiting for message from gateway")
 			m, err := c.session.Receive()
@@ -79,7 +82,7 @@ func (c Client) Run() error {
 				break // restart loop
 			}
 			log.Debugf("received message from gateway: %v", m)
-			c.fromgateway <- m
+			c.fromGateway <- m
 		}
 	}
 }
