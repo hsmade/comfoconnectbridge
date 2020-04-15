@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
@@ -26,18 +27,21 @@ type Message struct {
 	Operation     proto.GatewayOperation
 	RawMessage    []byte
 	OperationType OperationType
-	ctx context.Context
+	Ctx           context.Context
 }
 
-func GetMessageFromSocket(conn net.Conn) (*Message, error) {
+func GetMessageFromSocket(ctx context.Context, conn net.Conn) (*Message, error) {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
 		"method": "GetMessageFromSocket",
 	})
+	span, _ := opentracing.StartSpanFromContext(ctx, "comfoconnect.GetMessageFromSocket")
+	defer span.Finish()
+	span.SetTag("remote", conn.RemoteAddr().String())
 
 	var completeMessage []byte
 
-	lengthBytes, err := readBytes(conn, 4)
+	lengthBytes, err := readBytes(ctx, conn, 4)
 	if err != nil {
 		if opErr, ok := errors.Cause(err).(*net.OpError); ok && opErr.Timeout() {
 			// read timeout, silently ignore
@@ -56,23 +60,26 @@ func GetMessageFromSocket(conn net.Conn) (*Message, error) {
 	}
 	log.Trace("length: %d", length)
 
-	src, err := readBytes(conn, 16)
+	src, err := readBytes(ctx, conn, 16)
 	if err != nil {
 		log.Errorf("failed to read Src: %v", err)
 		return nil, errors.Wrap(err, "reading Src")
 	}
 	completeMessage = append(completeMessage, src...)
 	log.Trace("Src: %x", src)
+	span.SetTag("uuid", src)
+	span.SetTag("src", src)
 
-	dst, err := readBytes(conn, 16)
+	dst, err := readBytes(ctx, conn, 16)
 	if err != nil {
 		log.Errorf("failed to read Dst: %v", err)
 		return nil, errors.Wrap(err, "reading Dst")
 	}
 	completeMessage = append(completeMessage, dst...)
 	log.Trace("Dst: %x", dst)
+	span.SetTag("dst", dst)
 
-	operationLengthBytes, err := readBytes(conn, 2)
+	operationLengthBytes, err := readBytes(ctx, conn, 2)
 	if err != nil {
 		log.Errorf("failed to read operation length int: %v", err)
 		return nil, errors.Wrap(err, "reading operation length")
@@ -88,26 +95,29 @@ func GetMessageFromSocket(conn net.Conn) (*Message, error) {
 	}
 	log.Trace("operationLength: %d", operationLength)
 
-	operationBytes, err := readBytes(conn, int(operationLength))
+	operationBytes, err := readBytes(ctx, conn, int(operationLength))
 	if err != nil {
 		log.Errorf("failed to read operation: %v", err)
 		return nil, errors.Wrap(err, "reading operation")
 	}
 	completeMessage = append(completeMessage, operationBytes...)
 	log.Trace("operationBytes: %x", operationBytes)
+	span.SetTag("operationBytes", operationBytes)
 
 	operationTypeLength := (length - 34) - uint32(operationLength)
 	var operationTypeBytes []byte
 
 	if operationTypeLength > 0 {
 		log.Trace("operationTypeLength: %d", operationTypeLength)
-		operationTypeBytes, err = readBytes(conn, int(operationTypeLength))
+		operationTypeBytes, err = readBytes(ctx, conn, int(operationTypeLength))
 		if err != nil {
 			log.Errorf("failed to read operationTypeBytes: %v", err)
 			return nil, errors.Wrap(err, "reading operation type")
 		}
 		completeMessage = append(completeMessage, operationTypeBytes...)
 		log.Trace("operationTypeBytes: %x", operationTypeBytes)
+		span.SetTag("operationTypeBytes", operationTypeBytes)
+
 	}
 
 	operation := proto.GatewayOperation{} // FIXME: parse instead of assume
@@ -116,7 +126,7 @@ func GetMessageFromSocket(conn net.Conn) (*Message, error) {
 		return nil, errors.Wrap(err, "failed to unmarshal operation")
 	}
 
-	operationType := getStructForType(operation.Type.String())
+	operationType := getStructForType(ctx, operation.Type.String())
 	err = operationType.XXX_Unmarshal(operationTypeBytes)
 	if err != nil {
 		log.Errorf("failed to unmarshal operation type for operation=%v and bytes:%x coming from src=%x and remote=%s", operation.Type.String(), operationTypeBytes, src, conn.RemoteAddr().String())
@@ -129,6 +139,7 @@ func GetMessageFromSocket(conn net.Conn) (*Message, error) {
 		Operation:     operation,
 		RawMessage:    completeMessage,
 		OperationType: operationType,
+		Ctx:           ctx,
 	}
 
 	switch message.Operation.Type.String() {
@@ -160,12 +171,15 @@ func (m *Message) String() string {
 }
 
 // creates the correct response message as a byte slice, for the parent message
-func (m *Message) CreateResponse(status proto.GatewayOperation_GatewayResult) []byte {
+func (m *Message) CreateResponse(ctx context.Context, status proto.GatewayOperation_GatewayResult) []byte {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
 		"object": "Message",
 		"method": "CreateResponse",
 	})
+
+	span, _ := opentracing.StartSpanFromContext(ctx, "comfoconnect.Message.CreateResponse")
+	defer span.Finish()
 
 	log.Debugf("creating response for operation type: %s", reflect.TypeOf(m.OperationType).Elem().Name())
 	responseType := getResponseTypeForOperationType(m.OperationType)
@@ -178,7 +192,7 @@ func (m *Message) CreateResponse(status proto.GatewayOperation_GatewayResult) []
 		operation.Result = nil
 	}
 
-	responseStruct := getStructForType(responseType.String())
+	responseStruct := getStructForType(ctx, responseType.String())
 	if responseStruct == nil {
 		log.Errorf("unable to find struct for type: %s", responseType.String())
 		return nil
@@ -227,10 +241,10 @@ func (m *Message) CreateResponse(status proto.GatewayOperation_GatewayResult) []
 
 	}
 
-	return m.packMessage(operation, responseStruct)
+	return m.packMessage(ctx, operation, responseStruct)
 }
 
-func (m *Message) CreateCustomResponse(operationType proto.GatewayOperation_OperationType, operationTypeStruct OperationType) []byte {
+func (m *Message) CreateCustomResponse(ctx context.Context, operationType proto.GatewayOperation_OperationType, operationTypeStruct OperationType) []byte {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
 		"object": "Message",
@@ -244,16 +258,19 @@ func (m *Message) CreateCustomResponse(operationType proto.GatewayOperation_Oper
 		Result:    nil,
 	}
 
-	return m.packMessage(operation, operationTypeStruct)
+	return m.packMessage(ctx, operation, operationTypeStruct)
 }
 
 // setup a binary message ready to send
-func (m *Message) packMessage(operation proto.GatewayOperation, operationType OperationType) []byte {
+func (m *Message) packMessage(ctx context.Context, operation proto.GatewayOperation, operationType OperationType) []byte {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
 		"object": "Message",
 		"method": "packMessage",
 	})
+
+	span, _ := opentracing.StartSpanFromContext(ctx, "comfoconnect.Message.packMessage")
+	defer span.Finish()
 
 	operationBytes, _ := operation.XXX_Marshal(nil, false)
 	log.Trace("operationBytes: %x", operationBytes)
@@ -274,8 +291,8 @@ func (m *Message) packMessage(operation proto.GatewayOperation, operationType Op
 	return response
 }
 
-func (m *Message) Encode() []byte {
-	return m.packMessage(m.Operation, m.OperationType)
+func (m *Message) Encode(ctx context.Context) []byte {
+	return m.packMessage(ctx, m.Operation, m.OperationType)
 }
 
 // take an IP address, and a MAC address to respond with and create search gateway response
@@ -298,11 +315,13 @@ func CreateSearchGatewayResponse(ipAddress string, macAddress []byte) []byte {
 }
 
 // takes the name for an operation type and finds the struct for it
-func getStructForType(operationTypeString string) OperationType {
+func getStructForType(ctx context.Context, operationTypeString string) OperationType {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
 		"method": "getStructForType",
 	})
+	span, _ := opentracing.StartSpanFromContext(ctx, "comfoconnect.getStructForType")
+	defer span.Finish()
 
 	var operationType OperationType
 	switch operationTypeString {
@@ -521,11 +540,14 @@ func getResponseTypeForOperationType(operationType OperationType) proto.GatewayO
 	return responseTypeString
 }
 
-func readBytes(conn net.Conn, size int) ([]byte, error) {
+func readBytes(ctx context.Context, conn net.Conn, size int) ([]byte, error) {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
 		"method": "readBytes",
 	})
+
+	span, _ := opentracing.StartSpanFromContext(ctx, "comfoconnect.readBytes")
+	defer span.Finish()
 
 	var result []byte
 	for {

@@ -1,12 +1,14 @@
 package comfoconnect
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
@@ -20,14 +22,17 @@ type Session struct {
 	Conn net.Conn
 }
 
-func CreateSession(comfoConnectIP string, pin uint32, src []byte) (*Session, error) {
+func CreateSession(ctx context.Context, comfoConnectIP string, pin uint32, src []byte) (*Session, error) {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
 		"method": "CreateSession",
 	})
 
+	span, _ := opentracing.StartSpanFromContext(ctx, "comfoconnect.CreateSession")
+	defer span.Finish()
+
 	// first ping the gateway to get its UUID
-	dst, err := discoverGateway(comfoConnectIP)
+	dst, err := discoverGateway(ctx, comfoConnectIP)
 	if err != nil {
 		log.Errorf("failed to discover gateway: %v", err)
 		return nil, errors.Wrap(err, "discovering gateway")
@@ -64,10 +69,11 @@ func CreateSession(comfoConnectIP string, pin uint32, src []byte) (*Session, err
 			Pin:        &pin,
 			Devicename: &deviceName,
 		},
+		Ctx: ctx,
 	}
 
-	log.Debugf("Writing RegisterAppRequest: %x", m.Encode())
-	_, err = conn.Write(m.Encode())
+	log.Debugf("Writing RegisterAppRequest: %x", m.Encode(ctx))
+	_, err = conn.Write(m.Encode(ctx))
 	if err != nil {
 		log.Errorf("failed to send RegisterAppRequest: %v", err)
 		return nil, errors.Wrap(err, "sending RegisterAppRequest")
@@ -75,7 +81,7 @@ func CreateSession(comfoConnectIP string, pin uint32, src []byte) (*Session, err
 
 	// receive the confirmation for the registration
 	log.Debugf("receiving RegisterAppConfirm")
-	m, err = GetMessageFromSocket(conn)
+	m, err = GetMessageFromSocket(ctx, conn)
 	if err != nil {
 		log.Errorf("failed to receive RegisterAppConfirm: %v", err)
 		return nil, errors.Wrap(err, "receiving RegisterAppConfirm")
@@ -84,7 +90,7 @@ func CreateSession(comfoConnectIP string, pin uint32, src []byte) (*Session, err
 		log.Errorf("invalid message type, expected RegisterAppConfirm but got: %v", m.String())
 		return nil, errors.New(fmt.Sprintf("received invalid message type instead of RegisterAppConfirmType: %v", m.String()))
 	}
-	log.Debugf("received RegisterAppConfirm: %x", m.Encode())
+	log.Debugf("received RegisterAppConfirm: %x", m.Encode(ctx))
 
 	// send a start session request
 	reference++
@@ -97,15 +103,16 @@ func CreateSession(comfoConnectIP string, pin uint32, src []byte) (*Session, err
 			Reference: &reference,
 		},
 		OperationType: &proto.StartSessionRequest{},
+		Ctx:           ctx,
 	}
-	_, err = conn.Write(m.Encode())
+	_, err = conn.Write(m.Encode(ctx))
 	if err != nil {
 		log.Errorf("failed to send StartSessionRequest: %v", err)
 		return nil, errors.Wrap(err, "sending StartSessionRequest")
 	}
 
 	// receive the confirmation for the session
-	m, err = GetMessageFromSocket(conn)
+	m, err = GetMessageFromSocket(ctx, conn)
 	if err != nil {
 		log.Errorf("failed to receive StartSessionConfirm: %v", err)
 		return nil, errors.Wrap(err, "receiving StartSessionConfirm")
@@ -122,16 +129,19 @@ func CreateSession(comfoConnectIP string, pin uint32, src []byte) (*Session, err
 		Conn: conn,
 	}
 
-	go s.keepAlive()
+	go s.keepAlive(ctx)
 	return &s, nil
 }
 
-func (s *Session) keepAlive() {
+func (s *Session) keepAlive(ctx context.Context) {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
 		"object": "Session",
 		"method": "keepAlive",
 	})
+
+	span, _ := opentracing.StartSpanFromContext(ctx, "comfoconnect.Session.keepAlive")
+	defer span.Finish()
 
 	ticker := time.NewTicker(5 * time.Second)
 	reference := uint32(50)
@@ -148,8 +158,9 @@ func (s *Session) keepAlive() {
 					Reference: &reference,
 				},
 				OperationType: &proto.CnTimeRequest{},
+				Ctx:           ctx,
 			}
-			_, err := s.Conn.Write(m.Encode())
+			_, err := s.Conn.Write(m.Encode(ctx))
 			if err != nil {
 				if errors.Cause(err) == io.EOF {
 					log.Debug("Connection closed, stopping keepalives")
@@ -165,11 +176,14 @@ func (s *Session) keepAlive() {
 	}
 }
 // send a UDP packet to `ip` and expect a searchGatewayResponse with the uuid
-func discoverGateway(ip string) (uuid []byte, err error) {
+func discoverGateway(ctx context.Context, ip string) (uuid []byte, err error) {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
 		"method": "discoverGateway",
 	})
+
+	span, _ := opentracing.StartSpanFromContext(ctx, "comfoconnect.discoverGateway")
+	defer span.Finish()
 
 	raddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:56747", ip))
 	if err != nil {
@@ -207,7 +221,11 @@ func discoverGateway(ip string) (uuid []byte, err error) {
 	return response.Uuid, nil
 }
 
-func (s *Session) Close() {
+func (s *Session) Close(ctx context.Context) {
+	span, _ := opentracing.StartSpanFromContext(ctx, "comfoconnect.Sessions.Close")
+	defer span.Finish()
+
+
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
 		"object": "Session",
@@ -228,15 +246,21 @@ func (s *Session) Close() {
 		},
 		OperationType: &proto.CloseSessionRequest{},
 	}
-	_, _ = s.Conn.Write(m.Encode())
+	_, _ = s.Conn.Write(m.Encode(ctx))
 }
 
-func (s *Session) Receive() (*Message, error) {
+func (s *Session) Receive(ctx context.Context) (*Message, error) {
+	span, _ := opentracing.StartSpanFromContext(ctx, "comfoconnect.Sessions.Receive")
+	defer span.Finish()
+
 	s.Conn.SetReadDeadline(time.Now().Add(time.Second * 1))
-	return GetMessageFromSocket(s.Conn)
+	return GetMessageFromSocket(ctx, s.Conn)
 }
 
-func (s *Session) Send(m *Message) error {
-	_, err := s.Conn.Write(m.Encode())
+func (s *Session) Send(ctx context.Context, m *Message) error {
+	span, _ := opentracing.StartSpanFromContext(ctx, "comfoconnect.Sessions.Send")
+	defer span.Finish()
+
+	_, err := s.Conn.Write(m.Encode(ctx))
 	return err
 }

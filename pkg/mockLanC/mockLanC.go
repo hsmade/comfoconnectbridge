@@ -1,11 +1,13 @@
 package mockLanC
 
 import (
+	"context"
 	"io"
 	"net"
 	"sync"
 	"time"
 
+	"github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
@@ -45,7 +47,10 @@ func NewMockLanC(myIP, comfoconnectIP string) *MockLanC {
 	return &b
 }
 
-func (m *MockLanC) Run() {
+func (m *MockLanC) Run(ctx context.Context) {
+	span, _ := opentracing.StartSpanFromContext(ctx, "mockLanC.MockLanC.Run")
+	defer span.Finish()
+
 	logrus.Debug("Starting new MockLanC")
 	var handlers sync.WaitGroup
 	for {
@@ -76,7 +81,7 @@ func (m *MockLanC) Run() {
 			handlers.Add(1)
 			go func() {
 				for {
-					err := m.handleClient(conn)
+					err := m.handleClient(ctx, conn)
 					if err != nil {
 						logrus.Errorf("failed to handle connection: %v", err)
 						break
@@ -88,12 +93,15 @@ func (m *MockLanC) Run() {
 	}
 }
 
-func (m *MockLanC) handleClient(conn net.Conn) error {
+func (m *MockLanC) handleClient(ctx context.Context, conn net.Conn) error {
 	logrus.Debugf("handling connection from %v", conn.RemoteAddr())
+	span, _ := opentracing.StartSpanFromContext(ctx, "mockLanC.MockLanC.handleClient")
+	defer span.Finish()
+
 	defer conn.Close()
 
 	for {
-		message, err := comfoconnect.GetMessageFromSocket(conn)
+		message, err := comfoconnect.GetMessageFromSocket(ctx, conn)
 		if err != nil {
 			if err, ok := errors.Cause(err).(net.Error); ok && err.Timeout() {
 				// this is a timeout, which just means there is no data (yet)
@@ -115,7 +123,7 @@ func (m *MockLanC) handleClient(conn net.Conn) error {
 		//case "StartSessionRequestType":
 		//	m.respond(conn, message.CreateResponse(proto.GatewayOperation_OK))
 		case "StartSessionRequestType":
-			m.respond(conn, message.CreateResponse(proto.GatewayOperation_OK))
+			m.respond(conn, message.CreateResponse(ctx, proto.GatewayOperation_OK))
 
 			i := uint32(1)
 			mode := proto.CnNodeNotification_NODE_NORMAL
@@ -126,7 +134,7 @@ func (m *MockLanC) handleClient(conn net.Conn) error {
 				Mode:      &mode,
 			}
 
-			m.respond(conn, message.CreateCustomResponse(proto.GatewayOperation_CnNodeNotificationType, &a))
+			m.respond(conn, message.CreateCustomResponse(ctx, proto.GatewayOperation_CnNodeNotificationType, &a))
 			i48 := uint32(48)
 			i5 := uint32(5)
 			i255 := uint32(255)
@@ -137,9 +145,9 @@ func (m *MockLanC) handleClient(conn net.Conn) error {
 				ZoneId:    &i255,
 				Mode:      &mode,
 			}
-			m.respond(conn, message.CreateCustomResponse(proto.GatewayOperation_CnNodeNotificationType, &a))
+			m.respond(conn, message.CreateCustomResponse(ctx, proto.GatewayOperation_CnNodeNotificationType, &a))
 		default:
-			m.respond(conn, message.CreateResponse(-1))
+			m.respond(conn, message.CreateResponse(ctx, -1))
 		}
 	}
 }

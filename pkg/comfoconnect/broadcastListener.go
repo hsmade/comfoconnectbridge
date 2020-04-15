@@ -1,10 +1,12 @@
 package comfoconnect
 
 import (
+	"context"
 	"net"
 	"sync"
 	"time"
 
+	"github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 
 	"github.com/sirupsen/logrus"
@@ -112,12 +114,15 @@ func (l *BroadcastListener) handleConnection(addr *net.UDPAddr) error {
 	return nil
 }
 
-func (l *BroadcastListener) Stop() {
+func (l *BroadcastListener) Stop(ctx context.Context) {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "proxy",
 		"object": "BroadcastListener",
 		"method": "Stop",
 	})
+
+	span, _ := opentracing.StartSpanFromContext(ctx, "comfoconnect.BroadcastListener.Stop")
+	defer span.Finish()
 
 	log.Debugf("Stopping")
 	close(l.quit)
