@@ -52,7 +52,7 @@ func CreateSession(comfoConnectIP string, pin uint32, src []byte) (*Session, err
 	deviceName := "Proxy"
 	reference := uint32(1)
 	operationType := proto.GatewayOperation_RegisterAppRequestType
-	m := Message{
+	m := &Message{
 		Src: src,
 		Dst: dst,
 		Operation: proto.GatewayOperation{
@@ -89,7 +89,7 @@ func CreateSession(comfoConnectIP string, pin uint32, src []byte) (*Session, err
 	// send a start session request
 	reference++
 	operationType = proto.GatewayOperation_StartSessionRequestType
-	_, err = conn.Write(Message{
+	m = &Message{
 		Src: src,
 		Dst: dst,
 		Operation: proto.GatewayOperation{
@@ -97,7 +97,8 @@ func CreateSession(comfoConnectIP string, pin uint32, src []byte) (*Session, err
 			Reference: &reference,
 		},
 		OperationType: &proto.StartSessionRequest{},
-	}.Encode())
+	}
+	_, err = conn.Write(m.Encode())
 	if err != nil {
 		log.Errorf("failed to send StartSessionRequest: %v", err)
 		return nil, errors.Wrap(err, "sending StartSessionRequest")
@@ -218,7 +219,7 @@ func (s *Session) Close() {
 	log.Debug("sending CloseSessionRequest")
 	reference := uint32(1)
 	operationType := proto.GatewayOperation_CloseSessionRequestType
-	_, _ = s.Conn.Write(Message{
+	m := &Message{
 		Src: s.Src,
 		Dst: s.Dst,
 		Operation: proto.GatewayOperation{
@@ -226,15 +227,16 @@ func (s *Session) Close() {
 			Reference: &reference,
 		},
 		OperationType: &proto.CloseSessionRequest{},
-	}.Encode())
+	}
+	_, _ = s.Conn.Write(m.Encode())
 }
 
-func (s *Session) Receive() (Message, error) {
+func (s *Session) Receive() (*Message, error) {
 	s.Conn.SetReadDeadline(time.Now().Add(time.Second * 1))
 	return GetMessageFromSocket(s.Conn)
 }
 
-func (s *Session) Send(m Message) error {
+func (s *Session) Send(m *Message) error {
 	_, err := s.Conn.Write(m.Encode())
 	return err
 }

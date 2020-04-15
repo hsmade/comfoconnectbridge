@@ -18,10 +18,10 @@ type Listener struct {
 	quit      chan bool
 	exited    chan bool
 	apps      map[string]*App
-	toGateway chan comfoconnect.Message
+	toGateway chan *comfoconnect.Message
 }
 
-func NewListener(toGateway chan comfoconnect.Message) *Listener {
+func NewListener(toGateway chan *comfoconnect.Message) *Listener {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "proxy",
 		"method": "NewListener",
@@ -117,7 +117,7 @@ type App struct {
 	conn net.Conn
 }
 
-func (a *App) HandleConnection(gateway chan comfoconnect.Message) error {
+func (a *App) HandleConnection(gateway chan *comfoconnect.Message) error {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "proxy",
 		"object": "listener",
@@ -135,7 +135,7 @@ func (a *App) HandleConnection(gateway chan comfoconnect.Message) error {
 			// FIXME: log error, ignore timeout
 			continue
 		}
-		log.Debugf("got a message from app(%s): %v", a.conn.RemoteAddr(), message)
+		log.Debugf("got a message from app(%s): %s", a.conn.RemoteAddr(), *message)
 
 		switch message.Operation.Type.String() {
 		case "RegisterAppRequestType":
@@ -168,13 +168,13 @@ func (a *App) HandleConnection(gateway chan comfoconnect.Message) error {
 			}
 			a.conn.Write(message.CreateCustomResponse(proto.GatewayOperation_CnNodeNotificationType, &notification))
 		default:
-			log.Debugf("forwarding message to gateway: %v", message)
+			log.Debugf("forwarding message to gateway: %s", *message)
 			gateway <- message
 		}
 	}
 }
 
-func (a *App) Write(message comfoconnect.Message) error {
+func (a *App) Write(message *comfoconnect.Message) error {
 	_, err := a.conn.Write(message.Encode())
 	return err
 }

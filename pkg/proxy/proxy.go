@@ -10,7 +10,7 @@ type Proxy struct {
 	client    *Client
 	uuid      []byte
 	listener  *Listener
-	toGateway chan comfoconnect.Message
+	toGateway chan *comfoconnect.Message
 	quit      chan bool
 	exited    chan bool
 }
@@ -24,7 +24,7 @@ func NewProxy(comfoConnectIP string, myMacAddress []byte) *Proxy {
 	uuid := []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x25, 0x10, 0x10, 0x80, 0x01} // uuid header
 	uuid = append(uuid, myMacAddress...)
 
-	toGateway := make(chan comfoconnect.Message)
+	toGateway := make(chan *comfoconnect.Message)
 	log.Info("creating new listener")
 	l := NewListener(toGateway)
 	log.Info("creating new cient")
@@ -61,13 +61,13 @@ func (p Proxy) Run() {
 			close(p.exited)
 			return
 		case message := <-p.toGateway:
-			log.Debugf("received a message: %v", message)
+			log.Debugf("received a message: %s", *message)
 			generateMetrics(message)
 			message.Src = p.uuid
-			log.Debugf("forwarding message to gateway: %v", message)
+			log.Debugf("forwarding message to gateway: %s", *message)
 			p.client.toGateway <- message
 		case message := <-p.client.fromGateway:
-			log.Debugf("received a message from gateway: %v", message)
+			log.Debugf("received a message from gateway: %s", *message)
 			generateMetrics(message)
 			for _, app := range p.listener.apps {
 				log.Debugf("copying message from gateway to app(%s/%x):%v", app.conn.RemoteAddr().String(), app.uuid)
@@ -94,12 +94,12 @@ func (p *Proxy) Stop() {
 	log.Info("Stopped")
 }
 
-func generateMetrics(message comfoconnect.Message) {
+func generateMetrics(message *comfoconnect.Message) {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
 		"object": "Proxy",
 		"method": "generateMetrics",
 	})
 
-	log.Debugf("called for %v", message)
+	log.Debugf("called for %s", *message)
 }

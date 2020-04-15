@@ -2,6 +2,7 @@ package comfoconnect
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"net"
@@ -25,9 +26,10 @@ type Message struct {
 	Operation     proto.GatewayOperation
 	RawMessage    []byte
 	OperationType OperationType
+	ctx context.Context
 }
 
-func GetMessageFromSocket(conn net.Conn) (Message, error) {
+func GetMessageFromSocket(conn net.Conn) (*Message, error) {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
 		"method": "GetMessageFromSocket",
@@ -39,10 +41,10 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 	if err != nil {
 		if opErr, ok := errors.Cause(err).(*net.OpError); ok && opErr.Timeout() {
 			// read timeout, silently ignore
-			return Message{}, err
+			return nil, err
 		}
 		log.Errorf("failed to read message length int: %v", err)
-		return Message{}, errors.Wrap(err, "reading message length")
+		return nil, errors.Wrap(err, "reading message length")
 	}
 	completeMessage = append(completeMessage, lengthBytes...)
 	length := binary.BigEndian.Uint32(lengthBytes)
@@ -50,14 +52,14 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 	if length < 0 || length > 1024 {
 		msg := fmt.Sprintf("got invalid length: %d", length)
 		log.Trace(msg)
-		return Message{}, errors.New(msg)
+		return nil, errors.New(msg)
 	}
 	log.Trace("length: %d", length)
 
 	src, err := readBytes(conn, 16)
 	if err != nil {
 		log.Errorf("failed to read Src: %v", err)
-		return Message{}, errors.Wrap(err, "reading Src")
+		return nil, errors.Wrap(err, "reading Src")
 	}
 	completeMessage = append(completeMessage, src...)
 	log.Trace("Src: %x", src)
@@ -65,7 +67,7 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 	dst, err := readBytes(conn, 16)
 	if err != nil {
 		log.Errorf("failed to read Dst: %v", err)
-		return Message{}, errors.Wrap(err, "reading Dst")
+		return nil, errors.Wrap(err, "reading Dst")
 	}
 	completeMessage = append(completeMessage, dst...)
 	log.Trace("Dst: %x", dst)
@@ -73,7 +75,7 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 	operationLengthBytes, err := readBytes(conn, 2)
 	if err != nil {
 		log.Errorf("failed to read operation length int: %v", err)
-		return Message{}, errors.Wrap(err, "reading operation length")
+		return nil, errors.Wrap(err, "reading operation length")
 	}
 	completeMessage = append(completeMessage, operationLengthBytes...)
 	operationLength := binary.BigEndian.Uint16(operationLengthBytes)
@@ -82,14 +84,14 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 	if operationLength < 1 || operationLength > 1024 {
 		msg := fmt.Sprintf("got invalid operationLength: %d", operationLength)
 		log.Trace(msg)
-		return Message{}, errors.New(msg)
+		return nil, errors.New(msg)
 	}
 	log.Trace("operationLength: %d", operationLength)
 
 	operationBytes, err := readBytes(conn, int(operationLength))
 	if err != nil {
 		log.Errorf("failed to read operation: %v", err)
-		return Message{}, errors.Wrap(err, "reading operation")
+		return nil, errors.Wrap(err, "reading operation")
 	}
 	completeMessage = append(completeMessage, operationBytes...)
 	log.Trace("operationBytes: %x", operationBytes)
@@ -102,7 +104,7 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 		operationTypeBytes, err = readBytes(conn, int(operationTypeLength))
 		if err != nil {
 			log.Errorf("failed to read operationTypeBytes: %v", err)
-			return Message{}, errors.Wrap(err, "reading operation type")
+			return nil, errors.Wrap(err, "reading operation type")
 		}
 		completeMessage = append(completeMessage, operationTypeBytes...)
 		log.Trace("operationTypeBytes: %x", operationTypeBytes)
@@ -111,14 +113,14 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 	operation := proto.GatewayOperation{} // FIXME: parse instead of assume
 	err = operation.XXX_Unmarshal(operationBytes)
 	if err != nil {
-		return Message{}, errors.Wrap(err, "failed to unmarshal operation")
+		return nil, errors.Wrap(err, "failed to unmarshal operation")
 	}
 
 	operationType := getStructForType(operation.Type.String())
 	err = operationType.XXX_Unmarshal(operationTypeBytes)
 	if err != nil {
 		log.Errorf("failed to unmarshal operation type for operation=%v and bytes:%x coming from src=%x and remote=%s", operation.Type.String(), operationTypeBytes, src, conn.RemoteAddr().String())
-		return Message{}, errors.Wrap(err, "failed to unmarshal operation type") // FIXME
+		return nil, errors.Wrap(err, "failed to unmarshal operation type") // FIXME
 	}
 
 	message := Message{
@@ -150,15 +152,15 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 		actual := message.OperationType.(*proto.CnRmiAsyncResponse)
 		log.Debugf("Received Rmi async response with result:%d and data:%x", *actual.Result, actual.Message)
 	}
-	return message, nil
+	return &message, nil
 }
 
-func (m Message) String() string {
+func (m *Message) String() string {
 	return fmt.Sprintf("Src=%x; Dst=%x; Cmd_type=%v; ref=%v; RawMessage=%x", m.Src, m.Dst, m.Operation.Type.String(), *m.Operation.Reference, m.RawMessage)
 }
 
 // creates the correct response message as a byte slice, for the parent message
-func (m Message) CreateResponse(status proto.GatewayOperation_GatewayResult) []byte {
+func (m *Message) CreateResponse(status proto.GatewayOperation_GatewayResult) []byte {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
 		"object": "Message",
@@ -228,7 +230,7 @@ func (m Message) CreateResponse(status proto.GatewayOperation_GatewayResult) []b
 	return m.packMessage(operation, responseStruct)
 }
 
-func (m Message) CreateCustomResponse(operationType proto.GatewayOperation_OperationType, operationTypeStruct OperationType) []byte {
+func (m *Message) CreateCustomResponse(operationType proto.GatewayOperation_OperationType, operationTypeStruct OperationType) []byte {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
 		"object": "Message",
@@ -246,7 +248,7 @@ func (m Message) CreateCustomResponse(operationType proto.GatewayOperation_Opera
 }
 
 // setup a binary message ready to send
-func (m Message) packMessage(operation proto.GatewayOperation, operationType OperationType) []byte {
+func (m *Message) packMessage(operation proto.GatewayOperation, operationType OperationType) []byte {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
 		"object": "Message",
@@ -272,7 +274,7 @@ func (m Message) packMessage(operation proto.GatewayOperation, operationType Ope
 	return response
 }
 
-func (m Message) Encode() []byte {
+func (m *Message) Encode() []byte {
 	return m.packMessage(m.Operation, m.OperationType)
 }
 

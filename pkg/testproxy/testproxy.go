@@ -95,7 +95,7 @@ func (p *Proxy) copy(from, to net.Conn, wg *sync.WaitGroup) {
 			continue
 		}
 
-		logrus.Infof("received message: %v", message)
+		logrus.Infof("received message: %s", *message)
 		writeLen, err := to.Write(message.RawMessage)
 		logrus.Debugf("wrote %d: %v", writeLen, err)
 	}

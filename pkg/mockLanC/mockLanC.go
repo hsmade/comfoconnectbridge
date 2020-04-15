@@ -109,7 +109,7 @@ func (m *MockLanC) handleClient(conn net.Conn) error {
 			continue
 		}
 
-		logrus.Infof("got a message from: %s: %v", conn.RemoteAddr(), message)
+		logrus.Infof("got a message from: %s: %s", conn.RemoteAddr(), *message)
 
 		switch message.Operation.Type.String() {
 		//case "StartSessionRequestType":

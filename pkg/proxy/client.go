@@ -13,14 +13,14 @@ import (
 type Client struct {
 	IP          string
 	uuid        []byte
-	toGateway   chan comfoconnect.Message
-	fromGateway chan comfoconnect.Message
+	toGateway   chan *comfoconnect.Message
+	fromGateway chan *comfoconnect.Message
 	quit        chan bool
 	exited      chan bool
 	session     *comfoconnect.Session
 }
 
-func NewClient(ip string, macAddress []byte, toGateway chan comfoconnect.Message) *Client {
+func NewClient(ip string, macAddress []byte, toGateway chan *comfoconnect.Message) *Client {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "proxy",
 		"method": "NewClient",
@@ -40,7 +40,7 @@ func NewClient(ip string, macAddress []byte, toGateway chan comfoconnect.Message
 		IP:          ip,
 		uuid:        uuid,
 		toGateway:   toGateway,
-		fromGateway: make(chan comfoconnect.Message),
+		fromGateway: make(chan *comfoconnect.Message),
 		session:     session,
 	}
 }
