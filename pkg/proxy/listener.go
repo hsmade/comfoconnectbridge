@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
@@ -82,13 +83,16 @@ func (l *Listener) Run() {
 				continue
 			}
 			log.Infof("got a new connection from: %s", conn.RemoteAddr().String())
+			//tracer := opentracing.GlobalTracer()
+			//span := tracer.StartSpan("Proxy.Listener.Run.Accept")
+			//span.SetTag("remote", conn.RemoteAddr().String())
 			handlers.Add(1)
 			go func() {
 				for {
 					app := App{conn: conn}
 					l.apps[conn.RemoteAddr().String()] = &app
 					log.Debug("starting handler")
-					err := app.HandleConnection(l.toGateway)
+					err := app.HandleConnection(nil, l.toGateway)
 					if err != nil {
 						log.Errorf("failed to handle connection: %v", err)
 						break
@@ -96,6 +100,7 @@ func (l *Listener) Run() {
 				}
 				handlers.Done()
 			}()
+			//span.Finish()
 		}
 	}
 }
@@ -117,7 +122,7 @@ type App struct {
 	conn net.Conn
 }
 
-func (a *App) HandleConnection(gateway chan comfoconnect.Message) error {
+func (a *App) HandleConnection(span opentracing.Span, gateway chan comfoconnect.Message) error {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "proxy",
 		"object": "listener",
@@ -125,26 +130,34 @@ func (a *App) HandleConnection(gateway chan comfoconnect.Message) error {
 	})
 
 	for {
+		//span = opentracing.StartSpan("proxy.App.HandleConnection", opentracing.ChildOf(span.Context()))
+		span = opentracing.GlobalTracer().StartSpan("proxy.App.HandleConnection")
+		span.SetTag("uuid", a.uuid)
+
 		//read message
 		a.conn.SetReadDeadline(time.Now().Add(time.Second * 1))
-		message, err := comfoconnect.GetMessageFromSocket(a.conn)
+		message, err := comfoconnect.GetMessageFromSocket(span, a.conn)
 		if err != nil {
 			if errors.Cause(err) == io.EOF {
+				span.SetTag("err", err)
 				return err
 			}
 			// FIXME: log error, ignore timeout
 			continue
 		}
 		log.Debugf("got a message from app(%s): %v", a.conn.RemoteAddr(), message)
+		span = opentracing.GlobalTracer().StartSpan("proxy.App.HandleConnection.ReceivedMessage", opentracing.ChildOf(span.Context()))
+		span.SetTag("message", message.String())
+
 
 		switch message.Operation.Type.String() {
 		case "RegisterAppRequestType":
 			log.Debug("responding to RegisterAppRequestType")
 			a.uuid = message.Src
-			a.conn.Write(message.CreateResponse(proto.GatewayOperation_OK))
+			a.conn.Write(message.CreateResponse(span, proto.GatewayOperation_OK))
 		case "StartSessionRequestType":
 			log.Debug("responding to StartSessionRequestType")
-			a.conn.Write(message.CreateResponse(proto.GatewayOperation_OK))
+			a.conn.Write(message.CreateResponse(span, proto.GatewayOperation_OK))
 
 			i := uint32(1)
 			mode := proto.CnNodeNotification_NODE_NORMAL
@@ -154,7 +167,7 @@ func (a *App) HandleConnection(gateway chan comfoconnect.Message) error {
 				ZoneId:    &i,
 				Mode:      &mode,
 			}
-			a.conn.Write(message.CreateCustomResponse(proto.GatewayOperation_CnNodeNotificationType, &notification))
+			a.conn.Write(message.CreateCustomResponse(span, proto.GatewayOperation_CnNodeNotificationType, &notification))
 
 			i48 := uint32(48)
 			i5 := uint32(5)
@@ -166,15 +179,20 @@ func (a *App) HandleConnection(gateway chan comfoconnect.Message) error {
 				ZoneId:    &i255,
 				Mode:      &mode,
 			}
-			a.conn.Write(message.CreateCustomResponse(proto.GatewayOperation_CnNodeNotificationType, &notification))
+			a.conn.Write(message.CreateCustomResponse(span, proto.GatewayOperation_CnNodeNotificationType, &notification))
 		default:
 			log.Debugf("forwarding message to gateway: %v", message)
-			gateway <- message
+			message.Span = span
+			gateway <- message // FIXME: span stops?
 		}
+		span.Finish()
 	}
 }
 
 func (a *App) Write(message comfoconnect.Message) error {
-	_, err := a.conn.Write(message.Encode())
+	span := opentracing.GlobalTracer().StartSpan("proxy.App.Write")
+	defer span.Finish()
+	len, err := a.conn.Write(message.Encode())
+	span.SetTag("len", len)
 	return err
 }

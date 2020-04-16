@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
@@ -75,7 +76,7 @@ func CreateSession(comfoConnectIP string, pin uint32, src []byte) (*Session, err
 
 	// receive the confirmation for the registration
 	log.Debugf("receiving RegisterAppConfirm")
-	m, err = GetMessageFromSocket(conn)
+	m, err = GetMessageFromSocket(nil, conn)
 	if err != nil {
 		log.Errorf("failed to receive RegisterAppConfirm: %v", err)
 		return nil, errors.Wrap(err, "receiving RegisterAppConfirm")
@@ -104,7 +105,7 @@ func CreateSession(comfoConnectIP string, pin uint32, src []byte) (*Session, err
 	}
 
 	// receive the confirmation for the session
-	m, err = GetMessageFromSocket(conn)
+	m, err = GetMessageFromSocket(nil, conn)
 	if err != nil {
 		log.Errorf("failed to receive StartSessionConfirm: %v", err)
 		return nil, errors.Wrap(err, "receiving StartSessionConfirm")
@@ -230,11 +231,24 @@ func (s *Session) Close() {
 }
 
 func (s *Session) Receive() (Message, error) {
+	span := opentracing.GlobalTracer().StartSpan("comfoconnect.Session.Receive")
+	defer span.Finish()
+	span.SetTag("session", s)
 	s.Conn.SetReadDeadline(time.Now().Add(time.Second * 1))
-	return GetMessageFromSocket(s.Conn)
+	m, err := GetMessageFromSocket(span, s.Conn)
+
+	//if err != nil {
+		m.Span = span
+		span.SetTag("message", m.String())
+	//}
+	return m, err
 }
 
 func (s *Session) Send(m Message) error {
-	_, err := s.Conn.Write(m.Encode())
+	span := opentracing.GlobalTracer().StartSpan("comfoconnect.Session.Send", opentracing.ChildOf(m.Span.Context()))
+	defer span.Finish()
+	span.SetTag("message", m.String())
+	len, err := s.Conn.Write(m.Encode())
+	span.SetTag("written", len)
 	return err
 }

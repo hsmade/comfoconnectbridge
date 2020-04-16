@@ -93,7 +93,7 @@ func (m *MockLanC) handleClient(conn net.Conn) error {
 	defer conn.Close()
 
 	for {
-		message, err := comfoconnect.GetMessageFromSocket(conn)
+		message, err := comfoconnect.GetMessageFromSocket(nil, conn)
 		if err != nil {
 			if err, ok := errors.Cause(err).(net.Error); ok && err.Timeout() {
 				// this is a timeout, which just means there is no data (yet)
@@ -115,7 +115,7 @@ func (m *MockLanC) handleClient(conn net.Conn) error {
 		//case "StartSessionRequestType":
 		//	m.respond(conn, message.CreateResponse(proto.GatewayOperation_OK))
 		case "StartSessionRequestType":
-			m.respond(conn, message.CreateResponse(proto.GatewayOperation_OK))
+			m.respond(conn, message.CreateResponse(nil, proto.GatewayOperation_OK))
 
 			i := uint32(1)
 			mode := proto.CnNodeNotification_NODE_NORMAL
@@ -126,7 +126,7 @@ func (m *MockLanC) handleClient(conn net.Conn) error {
 				Mode:      &mode,
 			}
 
-			m.respond(conn, message.CreateCustomResponse(proto.GatewayOperation_CnNodeNotificationType, &a))
+			m.respond(conn, message.CreateCustomResponse(nil, proto.GatewayOperation_CnNodeNotificationType, &a))
 			i48 := uint32(48)
 			i5 := uint32(5)
 			i255 := uint32(255)
@@ -137,9 +137,9 @@ func (m *MockLanC) handleClient(conn net.Conn) error {
 				ZoneId:    &i255,
 				Mode:      &mode,
 			}
-			m.respond(conn, message.CreateCustomResponse(proto.GatewayOperation_CnNodeNotificationType, &a))
+			m.respond(conn, message.CreateCustomResponse(nil, proto.GatewayOperation_CnNodeNotificationType, &a))
 		default:
-			m.respond(conn, message.CreateResponse(-1))
+			m.respond(conn, message.CreateResponse(nil, -1))
 		}
 	}
 }

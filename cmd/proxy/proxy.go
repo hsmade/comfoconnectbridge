@@ -5,10 +5,12 @@ import (
 	"os/signal"
 	"time"
 
+	"github.com/opentracing/opentracing-go"
 	"github.com/sirupsen/logrus"
 
 	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
 	"github.com/hsmade/comfoconnectbridge/pkg/proxy"
+	"github.com/hsmade/comfoconnectbridge/pkg/tracing"
 )
 
 func main() {
@@ -18,6 +20,10 @@ func main() {
 	customFormatter.TimestampFormat = time.StampMilli
 	logrus.SetFormatter(customFormatter)
 	customFormatter.FullTimestamp = true
+
+	tracer, closer := tracing.New("proxy")
+	defer closer.Close()
+	opentracing.SetGlobalTracer(tracer)
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)

@@ -4,6 +4,7 @@ import (
 	"io"
 	"net"
 
+	"github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
@@ -62,11 +63,16 @@ func (c Client) Run() error {
 			return nil
 
 		case m := <-c.toGateway:
+			span := opentracing.GlobalTracer().StartSpan("proxy.Client.Run.toGateway", opentracing.ChildOf(m.Span.Context()))
+			span.SetTag("message", m.String())
+			m.Span = span
 			log.Debugf("sending message to gateway: %v", m)
 			err := c.session.Send(m)
 			if err != nil {
+				span.SetTag("err", err)
 				log.Errorf("sending message to gateway failed: %v", err)
 			}
+			span.Finish()
 		default:
 			log.Debug("waiting for message from gateway")
 			m, err := c.session.Receive()
@@ -82,7 +88,11 @@ func (c Client) Run() error {
 				break // restart loop
 			}
 			log.Debugf("received message from gateway: %v", m)
+			span := opentracing.GlobalTracer().StartSpan("proxy.Client.Run.default", opentracing.ChildOf(m.Span.Context()))
+			span.SetTag("message", m.String())
+			m.Span = span
 			c.fromGateway <- m
+			span.Finish()
 		}
 	}
 }

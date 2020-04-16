@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"github.com/opentracing/opentracing-go"
 	"github.com/sirupsen/logrus"
 
 	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
@@ -62,12 +63,19 @@ func (p Proxy) Run() {
 			return
 		case message := <-p.toGateway:
 			log.Debugf("received a message: %v", message)
+			span := opentracing.GlobalTracer().StartSpan("proxy.Proxy.Run.ReceivedForGateway", opentracing.ChildOf(message.Span.Context()))
+			span.SetTag("message", message)
+			message.Span = span
 			generateMetrics(message)
 			message.Src = p.uuid
 			log.Debugf("forwarding message to gateway: %v", message)
 			p.client.toGateway <- message
+			span.Finish()
 		case message := <-p.client.fromGateway:
 			log.Debugf("received a message from gateway: %v", message)
+			span := opentracing.GlobalTracer().StartSpan("proxy.Proxy.Run.ReceivedFromGateway", opentracing.ChildOf(message.Span.Context()))
+			span.SetTag("message", message)
+			message.Span = span
 			generateMetrics(message)
 			for _, app := range p.listener.apps {
 				log.Debugf("copying message from gateway to app(%s/%x):%v", app.conn.RemoteAddr().String(), app.uuid)
@@ -77,6 +85,7 @@ func (p Proxy) Run() {
 					log.Errorf("error while copying message from gateway to app(%s/%x):%v", app.conn.RemoteAddr().String(), app.uuid, err)
 				}
 			}
+			span.Finish()
 		}
 	}
 }
@@ -100,6 +109,9 @@ func generateMetrics(message comfoconnect.Message) {
 		"object": "Proxy",
 		"method": "generateMetrics",
 	})
+	span := opentracing.GlobalTracer().StartSpan("proxy.generateMetrics", opentracing.ChildOf(message.Span.Context()))
+	span.SetTag("message", message)
+	defer span.Finish()
 
 	log.Debugf("called for %v", message)
 }
