@@ -9,11 +9,42 @@ import (
 
 	"github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 	"github.com/uber/jaeger-client-go"
 
 	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
 	"github.com/hsmade/comfoconnectbridge/proto"
+)
+
+var (
+	clientConnections = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "comfoconnect_proxy_listener_connections",
+			Help: "Number of connections to the listener.",
+		},
+	)
+	messageSentCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "comfoconnect_proxy_listener_message_sent_total",
+			Help: "Number of messages sent by the listener.",
+		},
+		[]string{"message_type"},
+	)
+	messageReceiverCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "comfoconnect_proxy_listener_message_receiver_total",
+			Help: "Number of messages received by the listener go func.",
+		},
+		[]string{"message_type"},
+	)
+	messageReceivedCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "comfoconnect_proxy_listener_message_received_total",
+			Help: "Number of messages received by the listener main loop.",
+		},
+		[]string{"message_type"},
+	)
 )
 
 type Listener struct {
@@ -40,6 +71,10 @@ func NewListener(toGateway chan comfoconnect.Message) *Listener {
 		log.Fatalf("failed to create listener: %v", err)
 	}
 
+	prometheus.MustRegister(clientConnections)
+	prometheus.MustRegister(messageSentCount)
+	prometheus.MustRegister(messageReceiverCount)
+	prometheus.MustRegister(messageReceivedCount)
 	return &Listener{
 
 		listener:  listener,
@@ -81,6 +116,7 @@ func (l *Listener) Run(ctx context.Context, wg *sync.WaitGroup) {
 				log.Errorf("failed to accept connection: %v", err)
 				continue
 			}
+			clientConnections.Inc()
 			log.Infof("got a new connection from: %s", conn.RemoteAddr().String())
 			handlers.Add(1)
 			go func() {
@@ -95,6 +131,7 @@ func (l *Listener) Run(ctx context.Context, wg *sync.WaitGroup) {
 					}
 				}
 				handlers.Done()
+				clientConnections.Dec()
 			}()
 		}
 	}
@@ -115,6 +152,13 @@ func (a *App) HandleConnection(ctx context.Context, wg *sync.WaitGroup, gateway 
 	log.Infof("handling connection from: %s", a.conn.RemoteAddr().String())
 
 	messageChannel := make(chan comfoconnect.Message, 10)
+	//prometheus.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+	//	Name: "comfoconnect_proxy_listener_messageChannel_queue",
+	//	Help: "The current number of items on messageChannel queue.",
+	//}, func() float64 {
+	//	return float64(len(messageChannel))
+	//}))
+
 	go func (ctx context.Context, wg *sync.WaitGroup, messageChannel chan comfoconnect.Message) {
 		log.Debug("starting socket reader")
 		for {
@@ -137,6 +181,7 @@ func (a *App) HandleConnection(ctx context.Context, wg *sync.WaitGroup, gateway 
 					// FIXME: log error, ignore timeout
 					continue
 				}
+				messageReceiverCount.WithLabelValues(message.Operation.Type.String()).Inc()
 				messageChannel <- message
 			}
 		}
@@ -150,6 +195,7 @@ func (a *App) HandleConnection(ctx context.Context, wg *sync.WaitGroup, gateway 
 			wg.Done()
 			return nil
 		case message := <- messageChannel:
+			messageReceivedCount.WithLabelValues(message.Operation.Type.String()).Inc()
 			span := opentracing.GlobalTracer().StartSpan("proxy.App.HandleConnection.ReceivedMessage", opentracing.ChildOf(message.Span.Context()))
 			comfoconnect.SpanSetMessage(span, message)
 			log.WithField("span",span.Context().(jaeger.SpanContext).String()).Debugf("got a message from app(%s): %v", a.conn.RemoteAddr(), message)
@@ -226,6 +272,7 @@ func (a *App) handleMessage(message comfoconnect.Message, gateway chan comfoconn
 }
 
 func (a *App) Write(message comfoconnect.Message) error {
+	messageSentCount.WithLabelValues(message.Operation.Type.String()).Inc()
 	span := opentracing.GlobalTracer().StartSpan("proxy.App.Write")
 	defer span.Finish()
 	length, err := a.conn.Write(message.Encode())

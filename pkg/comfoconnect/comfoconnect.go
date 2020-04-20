@@ -3,6 +3,7 @@ package comfoconnect
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"net"
 	"reflect"
@@ -183,11 +184,8 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 }
 
 func (m Message) String() string {
-	if m.Operation.Type == nil {
-		return "Empty object"
-	}
-	result := fmt.Sprintf("Src=%x; Dst=%x; Cmd_type=%v; ref=%v; RawMessage=%x", m.Src, m.Dst, m.Operation.Type.String(), *m.Operation.Reference, m.RawMessage)
-	return result
+	b, _ := json.Marshal(m)
+	 return string(b)
 }
 
 // creates the correct response message as a byte slice, for the parent message
@@ -329,6 +327,15 @@ func (m Message) packMessage(operation proto.GatewayOperation, operationType Ope
 
 func (m Message) Encode() []byte {
 	return m.packMessage(m.Operation, m.OperationType)
+}
+
+func (m Message) DecodePDO() RpdoTypeConverter {
+	if reflect.TypeOf(m).String() != "*proto.CnRpdoNotification" {
+		return nil
+	}
+	ppid := m.OperationType.(*proto.CnRpdoNotification).Pdid
+	data := m.OperationType.(*proto.CnRpdoNotification).Data
+	return NewPpid(*ppid, data)
 }
 
 // take an IP address, and a MAC address to respond with and create search gateway response
@@ -580,7 +587,13 @@ func readBytes(conn net.Conn, size int) ([]byte, error) {
 		"method": "readBytes",
 		"size": size,
 	})
+	log.Debugf("reading from %s", conn.RemoteAddr().String())
 
+	if size <1 {
+		err := errors.New(fmt.Sprintf("Invalid size: %d", size))
+		log.Error(err)
+		return nil, err
+	}
 	var result []byte
 	for {
 		//err := conn.SetReadDeadline(time.Now().Add(time.Second * 1))

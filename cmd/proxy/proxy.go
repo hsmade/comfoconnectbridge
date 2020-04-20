@@ -7,17 +7,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/opentracing/opentracing-go"
 	"github.com/sirupsen/logrus"
 
 	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
+	"github.com/hsmade/comfoconnectbridge/pkg/instrumentation"
 	"github.com/hsmade/comfoconnectbridge/pkg/proxy"
-	"github.com/hsmade/comfoconnectbridge/pkg/tracing"
 )
 
 func main() {
 	logrus.SetLevel(logrus.DebugLevel)
-	//logrus.SetReportCaller(true)
 	customFormatter := new(logrus.TextFormatter)
 	customFormatter.TimestampFormat = time.StampMilli
 	logrus.SetFormatter(customFormatter)
@@ -26,9 +24,9 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	wg := &sync.WaitGroup{}
 
-	tracer, closer := tracing.New("proxy")
+	closer := instrumentation.EnableTracing("proxy", "tower:5775")
 	defer closer.Close()
-	opentracing.SetGlobalTracer(tracer)
+	instrumentation.EnableMetrics()
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
