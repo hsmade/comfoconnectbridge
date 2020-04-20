@@ -93,7 +93,7 @@ func (m *MockLanC) handleClient(conn net.Conn) error {
 	defer conn.Close()
 
 	for {
-		message, err := comfoconnect.GetMessageFromSocket(nil, conn)
+		message, err := comfoconnect.GetMessageFromSocket(conn)
 		if err != nil {
 			if err, ok := errors.Cause(err).(net.Error); ok && err.Timeout() {
 				// this is a timeout, which just means there is no data (yet)

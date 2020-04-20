@@ -26,22 +26,20 @@ type Message struct {
 	Operation     proto.GatewayOperation
 	RawMessage    []byte
 	OperationType OperationType
-	Span opentracing.Span
+	Span          opentracing.Span
 }
 
-func GetMessageFromSocket(span opentracing.Span, conn net.Conn) (Message, error) {
+func GetMessageFromSocket(conn net.Conn) (Message, error) {
+	span := opentracing.StartSpan("comfoconnect.GetMessageFromSocket")
+	defer span.Finish()
+	span.SetTag("remote", conn.RemoteAddr().String())
+
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
 		"method": "GetMessageFromSocket",
+		//"span": span.Context().(jaeger.SpanContext).String(),
 	})
 
-	if span == nil {
-		span = opentracing.StartSpan("comfoconnect.GetMessageFromSocket")
-	} else {
-		span = opentracing.GlobalTracer().StartSpan("comfoconnect.GetMessageFromSocket", opentracing.ChildOf(span.Context()))
-	}
-	defer span.Finish()
-	span.SetTag("remote", conn.RemoteAddr().String())
 	var completeMessage []byte
 
 	lengthBytes, err := readBytes(conn, 4)
@@ -156,6 +154,7 @@ func GetMessageFromSocket(span opentracing.Span, conn net.Conn) (Message, error)
 		Operation:     operation,
 		RawMessage:    completeMessage,
 		OperationType: operationType,
+		Span:          span,
 	}
 
 	switch message.Operation.Type.String() {
@@ -179,7 +178,7 @@ func GetMessageFromSocket(span opentracing.Span, conn net.Conn) (Message, error)
 		actual := message.OperationType.(*proto.CnRmiAsyncResponse)
 		log.Debugf("Received Rmi async response with result:%d and data:%x", *actual.Result, actual.Message)
 	}
-	span.SetTag("messsage", message)
+	SpanSetMessage(span, message)
 	return message, nil
 }
 
@@ -193,12 +192,6 @@ func (m Message) String() string {
 
 // creates the correct response message as a byte slice, for the parent message
 func (m Message) CreateResponse(span opentracing.Span, status proto.GatewayOperation_GatewayResult) []byte {
-	log := logrus.WithFields(logrus.Fields{
-		"module": "comfoconnect",
-		"object": "Message",
-		"method": "CreateResponse",
-	})
-
 	if span == nil {
 		span = opentracing.StartSpan("comfoconnect.Message.CeateResponse")
 	} else {
@@ -206,6 +199,13 @@ func (m Message) CreateResponse(span opentracing.Span, status proto.GatewayOpera
 	}
 	defer span.Finish()
 	span.SetTag("status", status)
+
+	log := logrus.WithFields(logrus.Fields{
+		"module": "comfoconnect",
+		"object": "Message",
+		"method": "CreateResponse",
+		//"span": span.Context().(jaeger.SpanContext).String(),
+	})
 
 	log.Debugf("creating response for operation type: %s", reflect.TypeOf(m.OperationType).Elem().Name())
 	responseType := getResponseTypeForOperationType(m.OperationType)
@@ -269,19 +269,12 @@ func (m Message) CreateResponse(span opentracing.Span, status proto.GatewayOpera
 		}
 
 	}
-
 	result := m.packMessage(operation, responseStruct)
 	span.SetTag("result", result)
 	return result
 }
 
 func (m Message) CreateCustomResponse(span opentracing.Span, operationType proto.GatewayOperation_OperationType, operationTypeStruct OperationType) []byte {
-	log := logrus.WithFields(logrus.Fields{
-		"module": "comfoconnect",
-		"object": "Message",
-		"method": "CreateCustomResponse",
-	})
-
 	if span == nil {
 		span = opentracing.StartSpan("comfoconnect.Message.CreateCustomResponse")
 	} else {
@@ -289,6 +282,13 @@ func (m Message) CreateCustomResponse(span opentracing.Span, operationType proto
 	}
 	defer span.Finish()
 	span.SetTag("operationType", operationType.String())
+
+	log := logrus.WithFields(logrus.Fields{
+		"module": "comfoconnect",
+		"object": "Message",
+		"method": "CreateCustomResponse",
+		//"span": span.Context().(jaeger.SpanContext).String(),
+	})
 
 	log.Debugf("creating custom response for operation type: %s", reflect.TypeOf(operationTypeStruct).Elem().Name())
 	operation := proto.GatewayOperation{
@@ -578,6 +578,7 @@ func readBytes(conn net.Conn, size int) ([]byte, error) {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
 		"method": "readBytes",
+		"size": size,
 	})
 
 	var result []byte
@@ -608,4 +609,17 @@ func readBytes(conn net.Conn, size int) ([]byte, error) {
 		}
 	}
 	return result, nil
+}
+
+func SpanSetMessage(span opentracing.Span, message Message) {
+	span.SetTag("messsage", message)
+	span.SetTag("src", fmt.Sprintf("%x",message.Src))
+	span.SetTag("dst", fmt.Sprintf("%x",message.Dst))
+	reference := message.Operation.Reference
+	if reference != nil {
+		span.SetTag("reference", fmt.Sprintf("%d", *reference))
+	} else {
+		span.SetTag("reference", "nil")
+	}
+	span.SetTag("operationType", reflect.TypeOf(message.OperationType))
 }
