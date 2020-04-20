@@ -58,7 +58,7 @@ func (l *BroadcastListener) Run() {
 		select {
 		case <-l.quit:
 			log.Info("Shutting down")
-			l.listener.Close()
+			//l.listener.Close()
 			handlers.Wait()
 			close(l.exited)
 			return
@@ -120,6 +120,7 @@ func (l *BroadcastListener) Stop() {
 	})
 
 	log.Debugf("Stopping")
+	l.listener.Close()
 	close(l.quit)
 	<-l.exited
 	log.Info("Stopped")

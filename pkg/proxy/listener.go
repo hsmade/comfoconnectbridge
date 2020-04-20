@@ -1,22 +1,55 @@
 package proxy
 
 import (
+	"context"
 	"io"
 	"net"
 	"sync"
 	"time"
 
+	"github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
+	"github.com/uber/jaeger-client-go"
 
 	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
 	"github.com/hsmade/comfoconnectbridge/proto"
 )
 
+var (
+	clientConnections = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "comfoconnect_proxy_listener_connections",
+			Help: "Number of connections to the listener.",
+		},
+	)
+	messageSentCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "comfoconnect_proxy_listener_message_sent_total",
+			Help: "Number of messages sent by the listener.",
+		},
+		[]string{"message_type"},
+	)
+	messageReceiverCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "comfoconnect_proxy_listener_message_receiver_total",
+			Help: "Number of messages received by the listener go func.",
+		},
+		[]string{"message_type"},
+	)
+	messageReceivedCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "comfoconnect_proxy_listener_message_received_total",
+			Help: "Number of messages received by the listener main loop.",
+		},
+		[]string{"message_type"},
+	)
+)
+
 type Listener struct {
 	listener  *net.TCPListener
-	quit      chan bool
-	exited    chan bool
+
 	apps      map[string]*App
 	toGateway chan comfoconnect.Message
 }
@@ -38,16 +71,19 @@ func NewListener(toGateway chan comfoconnect.Message) *Listener {
 		log.Fatalf("failed to create listener: %v", err)
 	}
 
+	prometheus.MustRegister(clientConnections)
+	prometheus.MustRegister(messageSentCount)
+	prometheus.MustRegister(messageReceiverCount)
+	prometheus.MustRegister(messageReceivedCount)
 	return &Listener{
-		quit:      make(chan bool),
-		exited:    make(chan bool),
+
 		listener:  listener,
 		toGateway: toGateway,
 		apps:      make(map[string]*App),
 	}
 }
 
-func (l *Listener) Run() {
+func (l *Listener) Run(ctx context.Context, wg *sync.WaitGroup) {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "proxy",
 		"object": "listener",
@@ -58,11 +94,11 @@ func (l *Listener) Run() {
 	var handlers sync.WaitGroup
 	for {
 		select {
-		case <-l.quit:
+		case <-ctx.Done():
 			log.Info("shutting down")
-			l.listener.Close()
+			_ = l.listener.Close()
 			handlers.Wait()
-			close(l.exited)
+			wg.Done()
 			return
 
 		default:
@@ -72,7 +108,6 @@ func (l *Listener) Run() {
 				continue
 			}
 
-			// log.Debug("waiting for new connections")
 			conn, err := l.listener.Accept()
 			if err != nil {
 				if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {
@@ -81,6 +116,7 @@ func (l *Listener) Run() {
 				log.Errorf("failed to accept connection: %v", err)
 				continue
 			}
+			clientConnections.Inc()
 			log.Infof("got a new connection from: %s", conn.RemoteAddr().String())
 			handlers.Add(1)
 			go func() {
@@ -88,28 +124,17 @@ func (l *Listener) Run() {
 					app := App{conn: conn}
 					l.apps[conn.RemoteAddr().String()] = &app
 					log.Debug("starting handler")
-					err := app.HandleConnection(l.toGateway)
+					err := app.HandleConnection(ctx, wg, l.toGateway)
 					if err != nil {
 						log.Errorf("failed to handle connection: %v", err)
 						break
 					}
 				}
 				handlers.Done()
+				clientConnections.Dec()
 			}()
 		}
 	}
-}
-
-func (l *Listener) Stop() {
-	log := logrus.WithFields(logrus.Fields{
-		"module": "proxy",
-		"object": "listener",
-		"method": "Stop",
-	})
-	log.Debug("stopping")
-	close(l.quit)
-	<-l.exited
-	log.Info("stopped")
 }
 
 type App struct {
@@ -117,64 +142,140 @@ type App struct {
 	conn net.Conn
 }
 
-func (a *App) HandleConnection(gateway chan comfoconnect.Message) error {
+func (a *App) HandleConnection(ctx context.Context, wg *sync.WaitGroup, gateway chan comfoconnect.Message) error {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "proxy",
 		"object": "listener",
 		"method": "HandleConnection",
 	})
 
-	for {
-		//read message
-		a.conn.SetReadDeadline(time.Now().Add(time.Second * 1))
-		message, err := comfoconnect.GetMessageFromSocket(a.conn)
-		if err != nil {
-			if errors.Cause(err) == io.EOF {
-				return err
+	log.Infof("handling connection from: %s", a.conn.RemoteAddr().String())
+
+	messageChannel := make(chan comfoconnect.Message, 10)
+	//prometheus.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+	//	Name: "comfoconnect_proxy_listener_messageChannel_queue",
+	//	Help: "The current number of items on messageChannel queue.",
+	//}, func() float64 {
+	//	return float64(len(messageChannel))
+	//}))
+
+	go func (ctx context.Context, wg *sync.WaitGroup, messageChannel chan comfoconnect.Message) {
+		log.Debug("starting socket reader")
+		for {
+			select {
+			case <- ctx.Done():
+				log.Debug("closing connection reader go-func")
+				wg.Done()
+				return
+			default:
+				err := a.conn.SetReadDeadline(time.Now().Add(time.Millisecond * 100))
+				if err != nil {
+					log.Warnf("failed to set readDeadline: %v", err)
+				}
+
+				message, err := comfoconnect.GetMessageFromSocket(a.conn)
+				if err != nil {
+					if errors.Cause(err) == io.EOF {
+						return
+					}
+					// FIXME: log error, ignore timeout
+					continue
+				}
+				messageReceiverCount.WithLabelValues(message.Operation.Type.String()).Inc()
+				messageChannel <- message
 			}
-			// FIXME: log error, ignore timeout
-			continue
 		}
-		log.Debugf("got a message from app(%s): %v", a.conn.RemoteAddr(), message)
+	}(ctx, wg, messageChannel)
 
-		switch message.Operation.Type.String() {
-		case "RegisterAppRequestType":
-			log.Debug("responding to RegisterAppRequestType")
-			a.uuid = message.Src
-			a.conn.Write(message.CreateResponse(proto.GatewayOperation_OK))
-		case "StartSessionRequestType":
-			log.Debug("responding to StartSessionRequestType")
-			a.conn.Write(message.CreateResponse(proto.GatewayOperation_OK))
-
-			i := uint32(1)
-			mode := proto.CnNodeNotification_NODE_NORMAL
-			notification := proto.CnNodeNotification{
-				NodeId:    &i,
-				ProductId: &i,
-				ZoneId:    &i,
-				Mode:      &mode,
-			}
-			a.conn.Write(message.CreateCustomResponse(proto.GatewayOperation_CnNodeNotificationType, &notification))
-
-			i48 := uint32(48)
-			i5 := uint32(5)
-			i255 := uint32(255)
-			mode = proto.CnNodeNotification_NODE_NORMAL
-			notification = proto.CnNodeNotification{
-				NodeId:    &i48,
-				ProductId: &i5,
-				ZoneId:    &i255,
-				Mode:      &mode,
-			}
-			a.conn.Write(message.CreateCustomResponse(proto.GatewayOperation_CnNodeNotificationType, &notification))
-		default:
-			log.Debugf("forwarding message to gateway: %v", message)
-			gateway <- message
+	log.Debug("starting main loop")
+	for {
+		select {
+		case <- ctx.Done():
+			log.Debug("closing main loop")
+			wg.Done()
+			return nil
+		case message := <- messageChannel:
+			messageReceivedCount.WithLabelValues(message.Operation.Type.String()).Inc()
+			span := opentracing.GlobalTracer().StartSpan("proxy.App.HandleConnection.ReceivedMessage", opentracing.ChildOf(message.Span.Context()))
+			comfoconnect.SpanSetMessage(span, message)
+			log.WithField("span",span.Context().(jaeger.SpanContext).String()).Debugf("got a message from app(%s): %v", a.conn.RemoteAddr(), message)
+			a.handleMessage(message, gateway)
+			span.Finish()
 		}
 	}
 }
 
+func (a *App) handleMessage(message comfoconnect.Message, gateway chan comfoconnect.Message) {
+	span := opentracing.GlobalTracer().StartSpan("proxy.App.HandleConnection.handleMessage", opentracing.ChildOf(message.Span.Context()))
+	comfoconnect.SpanSetMessage(span, message)
+
+	log := logrus.WithFields(logrus.Fields{
+		"module": "proxy",
+		"object": "listener",
+		"method": "handleMessage",
+		"span": span.Context().(jaeger.SpanContext).String(),
+	})
+
+	switch message.Operation.Type.String() {
+	case "RegisterAppRequestType":
+		log.Debug("responding to RegisterAppRequestType")
+		a.uuid = message.Src
+		_, err := a.conn.Write(message.CreateResponse(span, proto.GatewayOperation_OK))
+		if err != nil {
+			span.SetTag("err", err)
+			log.Warnf("failed to write response for RegisterAppRequestType: %v", err)
+		}
+	case "StartSessionRequestType":
+		log.Debug("responding to StartSessionRequestType")
+		_, err := a.conn.Write(message.CreateResponse(span, proto.GatewayOperation_OK))
+		if err != nil {
+			span.SetTag("err", err)
+			log.Warnf("failed to write response for StartSessionRequestType: %v", err)
+		}
+
+		i := uint32(1)
+		mode := proto.CnNodeNotification_NODE_NORMAL
+		notification := proto.CnNodeNotification{
+			NodeId:    &i,
+			ProductId: &i,
+			ZoneId:    &i,
+			Mode:      &mode,
+		}
+		_, err = a.conn.Write(message.CreateCustomResponse(span, proto.GatewayOperation_CnNodeNotificationType, &notification))
+		if err != nil {
+			span.SetTag("err", err)
+			log.Warnf("failed to write CnNodeNotification-1: %v", err)
+		}
+
+		i48 := uint32(48)
+		i5 := uint32(5)
+		i255 := uint32(255)
+		mode = proto.CnNodeNotification_NODE_NORMAL
+		notification = proto.CnNodeNotification{
+			NodeId:    &i48,
+			ProductId: &i5,
+			ZoneId:    &i255,
+			Mode:      &mode,
+		}
+		_, err = a.conn.Write(message.CreateCustomResponse(span, proto.GatewayOperation_CnNodeNotificationType, &notification))
+		if err != nil {
+			span.SetTag("err", err)
+			log.Warnf("failed to write CnNodeNotification-2: %v", err)
+		}
+
+	default:
+		log.Debugf("forwarding message to gateway: %v", message)
+		message.Span = span
+		gateway <- message
+	}
+	span.Finish()
+}
+
 func (a *App) Write(message comfoconnect.Message) error {
-	_, err := a.conn.Write(message.Encode())
+	messageSentCount.WithLabelValues(message.Operation.Type.String()).Inc()
+	span := opentracing.GlobalTracer().StartSpan("proxy.App.Write")
+	defer span.Finish()
+	length, err := a.conn.Write(message.Encode())
+	span.SetTag("length", length)
 	return err
 }

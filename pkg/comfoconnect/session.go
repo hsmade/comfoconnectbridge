@@ -1,12 +1,15 @@
 package comfoconnect
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
@@ -20,10 +23,10 @@ type Session struct {
 	Conn net.Conn
 }
 
-func CreateSession(comfoConnectIP string, pin uint32, src []byte) (*Session, error) {
+func NewSession(ctx context.Context, wg *sync.WaitGroup, comfoConnectIP string, pin uint32, src []byte) (*Session, error) {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
-		"method": "CreateSession",
+		"method": "NewSession",
 	})
 
 	// first ping the gateway to get its UUID
@@ -121,11 +124,13 @@ func CreateSession(comfoConnectIP string, pin uint32, src []byte) (*Session, err
 		Conn: conn,
 	}
 
-	go s.keepAlive()
+	log.Debug("starting keep-alive loop")
+	wg.Add(1)
+	go s.keepAlive(ctx, wg)
 	return &s, nil
 }
 
-func (s *Session) keepAlive() {
+func (s *Session) keepAlive(ctx context.Context, wg *sync.WaitGroup) {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
 		"object": "Session",
@@ -136,6 +141,9 @@ func (s *Session) keepAlive() {
 	reference := uint32(50)
 	for {
 		select {
+		case <- ctx.Done():
+			wg.Done()
+			return
 		case <-ticker.C:
 			log.Debug("sending keep alive")
 			operationType := proto.GatewayOperation_CnTimeRequestType
@@ -231,10 +239,15 @@ func (s *Session) Close() {
 
 func (s *Session) Receive() (Message, error) {
 	s.Conn.SetReadDeadline(time.Now().Add(time.Second * 1))
-	return GetMessageFromSocket(s.Conn)
+	m, err := GetMessageFromSocket(s.Conn)
+	return m, err
 }
 
-func (s *Session) Send(m Message) error {
-	_, err := s.Conn.Write(m.Encode())
+func (s *Session) Send(message Message) error {
+	span := opentracing.GlobalTracer().StartSpan("comfoconnect.Session.Send", opentracing.ChildOf(message.Span.Context()))
+	defer span.Finish()
+	SpanSetMessage(span, message)
+	len, err := s.Conn.Write(message.Encode())
+	span.SetTag("written", len)
 	return err
 }

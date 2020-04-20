@@ -3,11 +3,13 @@ package comfoconnect
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"net"
 	"reflect"
 	"time"
 
+	"github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
@@ -25,12 +27,18 @@ type Message struct {
 	Operation     proto.GatewayOperation
 	RawMessage    []byte
 	OperationType OperationType
+	Span          opentracing.Span
 }
 
 func GetMessageFromSocket(conn net.Conn) (Message, error) {
+	span := opentracing.StartSpan("comfoconnect.GetMessageFromSocket")
+	defer span.Finish()
+	span.SetTag("remote", conn.RemoteAddr().String())
+
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
 		"method": "GetMessageFromSocket",
+		//"span": span.Context().(jaeger.SpanContext).String(),
 	})
 
 	var completeMessage []byte
@@ -39,57 +47,70 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 	if err != nil {
 		if opErr, ok := errors.Cause(err).(*net.OpError); ok && opErr.Timeout() {
 			// read timeout, silently ignore
+			span.SetTag("err", err)
 			return Message{}, err
 		}
-		log.Errorf("failed to read message length int: %v", err)
-		return Message{}, errors.Wrap(err, "reading message length")
+		err := errors.Wrap(err, "reading message length")
+		log.Error(err)
+		span.SetTag("err", err)
+		return Message{}, err
 	}
 	completeMessage = append(completeMessage, lengthBytes...)
 	length := binary.BigEndian.Uint32(lengthBytes)
 
 	if length < 0 || length > 1024 {
-		msg := fmt.Sprintf("got invalid length: %d", length)
-		log.Trace(msg)
-		return Message{}, errors.New(msg)
+		err := errors.New(fmt.Sprintf("got invalid length: %d", length))
+		log.Trace(err)
+		span.SetTag("err", err)
+		return Message{}, err
 	}
 	log.Trace("length: %d", length)
 
 	src, err := readBytes(conn, 16)
 	if err != nil {
-		log.Errorf("failed to read Src: %v", err)
-		return Message{}, errors.Wrap(err, "reading Src")
+		err := errors.Wrap(err, "reading Src")
+		log.Error(err)
+		span.SetTag("err", err)
+		return Message{}, err
 	}
 	completeMessage = append(completeMessage, src...)
 	log.Trace("Src: %x", src)
 
 	dst, err := readBytes(conn, 16)
 	if err != nil {
-		log.Errorf("failed to read Dst: %v", err)
-		return Message{}, errors.Wrap(err, "reading Dst")
+		err := errors.Wrap(err, "reading Dst")
+		log.Error(err)
+		span.SetTag("err", err)
+		return Message{}, err
 	}
 	completeMessage = append(completeMessage, dst...)
 	log.Trace("Dst: %x", dst)
 
 	operationLengthBytes, err := readBytes(conn, 2)
 	if err != nil {
-		log.Errorf("failed to read operation length int: %v", err)
-		return Message{}, errors.Wrap(err, "reading operation length")
+		err := errors.Wrap(err, "reading operation length")
+		log.Error(err)
+		span.SetTag("err", err)
+		return Message{}, err
 	}
 	completeMessage = append(completeMessage, operationLengthBytes...)
 	operationLength := binary.BigEndian.Uint16(operationLengthBytes)
 	operationLength = 4 // FIXME: sign error above?
 
 	if operationLength < 1 || operationLength > 1024 {
-		msg := fmt.Sprintf("got invalid operationLength: %d", operationLength)
-		log.Trace(msg)
-		return Message{}, errors.New(msg)
+		err := errors.New(fmt.Sprintf("got invalid operationLength: %d", operationLength))
+		log.Trace(err)
+		span.SetTag("err", err)
+		return Message{}, err
 	}
 	log.Trace("operationLength: %d", operationLength)
 
 	operationBytes, err := readBytes(conn, int(operationLength))
 	if err != nil {
-		log.Errorf("failed to read operation: %v", err)
-		return Message{}, errors.Wrap(err, "reading operation")
+		err := errors.Wrap(err, "reading operation")
+		log.Error(err)
+		span.SetTag("err", err)
+		return Message{}, err
 	}
 	completeMessage = append(completeMessage, operationBytes...)
 	log.Trace("operationBytes: %x", operationBytes)
@@ -101,8 +122,10 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 		log.Trace("operationTypeLength: %d", operationTypeLength)
 		operationTypeBytes, err = readBytes(conn, int(operationTypeLength))
 		if err != nil {
-			log.Errorf("failed to read operationTypeBytes: %v", err)
-			return Message{}, errors.Wrap(err, "reading operation type")
+			err := errors.Wrap(err, "reading operation type")
+			log.Error(err)
+			span.SetTag("err", err)
+			return Message{}, err
 		}
 		completeMessage = append(completeMessage, operationTypeBytes...)
 		log.Trace("operationTypeBytes: %x", operationTypeBytes)
@@ -111,14 +134,19 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 	operation := proto.GatewayOperation{} // FIXME: parse instead of assume
 	err = operation.XXX_Unmarshal(operationBytes)
 	if err != nil {
-		return Message{}, errors.Wrap(err, "failed to unmarshal operation")
+		err := errors.Wrap(err, "failed to unmarshal operation")
+		log.Error(err)
+		span.SetTag("err", err)
+		return Message{}, err
 	}
 
 	operationType := getStructForType(operation.Type.String())
 	err = operationType.XXX_Unmarshal(operationTypeBytes)
 	if err != nil {
-		log.Errorf("failed to unmarshal operation type for operation=%v and bytes:%x coming from src=%x and remote=%s", operation.Type.String(), operationTypeBytes, src, conn.RemoteAddr().String())
-		return Message{}, errors.Wrap(err, "failed to unmarshal operation type") // FIXME
+		err := errors.Wrap(err, "failed to unmarshal operation type") // FIXME
+		log.Error(err)
+		span.SetTag("err", err)
+		return Message{}, err
 	}
 
 	message := Message{
@@ -127,6 +155,7 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 		Operation:     operation,
 		RawMessage:    completeMessage,
 		OperationType: operationType,
+		Span:          span,
 	}
 
 	switch message.Operation.Type.String() {
@@ -150,23 +179,35 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 		actual := message.OperationType.(*proto.CnRmiAsyncResponse)
 		log.Debugf("Received Rmi async response with result:%d and data:%x", *actual.Result, actual.Message)
 	}
+	SpanSetMessage(span, message)
 	return message, nil
 }
 
 func (m Message) String() string {
-	return fmt.Sprintf("Src=%x; Dst=%x; Cmd_type=%v; ref=%v; RawMessage=%x", m.Src, m.Dst, m.Operation.Type.String(), *m.Operation.Reference, m.RawMessage)
+	b, _ := json.Marshal(m)
+	 return string(b)
 }
 
 // creates the correct response message as a byte slice, for the parent message
-func (m Message) CreateResponse(status proto.GatewayOperation_GatewayResult) []byte {
+func (m Message) CreateResponse(span opentracing.Span, status proto.GatewayOperation_GatewayResult) []byte {
+	if span == nil {
+		span = opentracing.StartSpan("comfoconnect.Message.CeateResponse")
+	} else {
+		span = opentracing.GlobalTracer().StartSpan("comfoconnect.Message.CeateResponse", opentracing.ChildOf(span.Context()))
+	}
+	defer span.Finish()
+	span.SetTag("status", status)
+
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
 		"object": "Message",
 		"method": "CreateResponse",
+		//"span": span.Context().(jaeger.SpanContext).String(),
 	})
 
 	log.Debugf("creating response for operation type: %s", reflect.TypeOf(m.OperationType).Elem().Name())
 	responseType := getResponseTypeForOperationType(m.OperationType)
+	span.SetTag("responseType", responseType.String())
 	operation := proto.GatewayOperation{
 		Type:      &responseType,
 		Reference: m.Operation.Reference,
@@ -178,7 +219,9 @@ func (m Message) CreateResponse(status proto.GatewayOperation_GatewayResult) []b
 
 	responseStruct := getStructForType(responseType.String())
 	if responseStruct == nil {
-		log.Errorf("unable to find struct for type: %s", responseType.String())
+		err := errors.New(fmt.Sprint("unable to find struct for type: %s", responseType.String()))
+		log.Error(err)
+		span.SetTag("err", err)
 		return nil
 	}
 
@@ -224,15 +267,25 @@ func (m Message) CreateResponse(status proto.GatewayOperation_GatewayResult) []b
 		}
 
 	}
-
-	return m.packMessage(operation, responseStruct)
+	result := m.packMessage(operation, responseStruct)
+	span.SetTag("result", result)
+	return result
 }
 
-func (m Message) CreateCustomResponse(operationType proto.GatewayOperation_OperationType, operationTypeStruct OperationType) []byte {
+func (m Message) CreateCustomResponse(span opentracing.Span, operationType proto.GatewayOperation_OperationType, operationTypeStruct OperationType) []byte {
+	if span == nil {
+		span = opentracing.StartSpan("comfoconnect.Message.CreateCustomResponse")
+	} else {
+		span = opentracing.GlobalTracer().StartSpan("comfoconnect.Message.CreateCustomResponse", opentracing.ChildOf(span.Context()))
+	}
+	defer span.Finish()
+	span.SetTag("operationType", operationType.String())
+
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
 		"object": "Message",
 		"method": "CreateCustomResponse",
+		//"span": span.Context().(jaeger.SpanContext).String(),
 	})
 
 	log.Debugf("creating custom response for operation type: %s", reflect.TypeOf(operationTypeStruct).Elem().Name())
@@ -274,6 +327,15 @@ func (m Message) packMessage(operation proto.GatewayOperation, operationType Ope
 
 func (m Message) Encode() []byte {
 	return m.packMessage(m.Operation, m.OperationType)
+}
+
+func (m Message) DecodePDO() RpdoTypeConverter {
+	if reflect.TypeOf(m).String() != "*proto.CnRpdoNotification" {
+		return nil
+	}
+	ppid := m.OperationType.(*proto.CnRpdoNotification).Pdid
+	data := m.OperationType.(*proto.CnRpdoNotification).Data
+	return NewPpid(*ppid, data)
 }
 
 // take an IP address, and a MAC address to respond with and create search gateway response
@@ -523,8 +585,15 @@ func readBytes(conn net.Conn, size int) ([]byte, error) {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
 		"method": "readBytes",
+		"size": size,
 	})
+	log.Debugf("reading from %s", conn.RemoteAddr().String())
 
+	if size <1 {
+		err := errors.New(fmt.Sprintf("Invalid size: %d", size))
+		log.Error(err)
+		return nil, err
+	}
 	var result []byte
 	for {
 		//err := conn.SetReadDeadline(time.Now().Add(time.Second * 1))
@@ -553,4 +622,17 @@ func readBytes(conn net.Conn, size int) ([]byte, error) {
 		}
 	}
 	return result, nil
+}
+
+func SpanSetMessage(span opentracing.Span, message Message) {
+	span.SetTag("messsage", message)
+	span.SetTag("src", fmt.Sprintf("%x",message.Src))
+	span.SetTag("dst", fmt.Sprintf("%x",message.Dst))
+	reference := message.Operation.Reference
+	if reference != nil {
+		span.SetTag("reference", fmt.Sprintf("%d", *reference))
+	} else {
+		span.SetTag("reference", "nil")
+	}
+	span.SetTag("operationType", reflect.TypeOf(message.OperationType))
 }

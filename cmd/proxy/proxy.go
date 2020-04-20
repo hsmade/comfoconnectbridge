@@ -1,40 +1,49 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/signal"
+	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
 
 	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
+	"github.com/hsmade/comfoconnectbridge/pkg/instrumentation"
 	"github.com/hsmade/comfoconnectbridge/pkg/proxy"
 )
 
 func main() {
 	logrus.SetLevel(logrus.DebugLevel)
-	//logrus.SetReportCaller(true)
 	customFormatter := new(logrus.TextFormatter)
 	customFormatter.TimestampFormat = time.StampMilli
 	logrus.SetFormatter(customFormatter)
 	customFormatter.FullTimestamp = true
 
+	ctx, cancel := context.WithCancel(context.Background())
+	wg := &sync.WaitGroup{}
+
+	closer := instrumentation.EnableTracing("proxy", "tower:5775")
+	defer closer.Close()
+	instrumentation.EnableMetrics()
+
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
 
-	l := comfoconnect.NewBroadcastListener("192.168.178.21", []byte{0x70, 0x85, 0xc2, 0xb7, 0x8c, 0xa0})
+	l := comfoconnect.NewBroadcastListener("192.168.178.52", []byte{0xb8, 0x27, 0xeb, 0xf9, 0xf9, 0x12})
 	go l.Run()
 	defer l.Stop()
 
-	p := proxy.NewProxy("192.168.178.21", []byte{0x70, 0x85, 0xc2, 0xb7, 0x8c, 0xa0})
-	go p.Run()
-	defer p.Stop()
+	p := proxy.NewProxy("192.168.178.2", []byte{0xb8, 0x27, 0xeb, 0xf9, 0xf9, 0x12})
+	go p.Run(ctx, wg)
 
 	logrus.Info("waiting for ctrl-c")
 	for _ = range c {
 		logrus.Info("closing down")
 		l.Stop()
-		p.Stop()
+		cancel()
+		wg.Wait()
 		os.Exit(0)
 	}
 }
