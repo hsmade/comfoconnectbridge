@@ -185,7 +185,7 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 
 func (m Message) String() string {
 	b, _ := json.Marshal(m)
-	 return string(b)
+	return string(b)
 }
 
 // creates the correct response message as a byte slice, for the parent message
@@ -313,8 +313,8 @@ func (m Message) packMessage(operation proto.GatewayOperation, operationType Ope
 	response := make([]byte, 4)
 	binary.BigEndian.PutUint32(response, uint32(len(operationTypeBytes)+34+len(operationBytes))) // raw message length
 	log.Trace("length: %x", response)
-	response = append(response, m.Dst...)
 	response = append(response, m.Src...)
+	response = append(response, m.Dst...)
 	b := make([]byte, 2)
 	binary.BigEndian.PutUint16(b, uint16(len(operationBytes))) // op length
 	log.Trace("op length: %x", b)
@@ -585,11 +585,11 @@ func readBytes(conn net.Conn, size int) ([]byte, error) {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
 		"method": "readBytes",
-		"size": size,
+		"size":   size,
 	})
 	log.Debugf("reading from %s", conn.RemoteAddr().String())
 
-	if size <1 {
+	if size < 1 {
 		err := errors.New(fmt.Sprintf("Invalid size: %d", size))
 		log.Error(err)
 		return nil, err
@@ -626,8 +626,8 @@ func readBytes(conn net.Conn, size int) ([]byte, error) {
 
 func SpanSetMessage(span opentracing.Span, message Message) {
 	span.SetTag("messsage", message)
-	span.SetTag("src", fmt.Sprintf("%x",message.Src))
-	span.SetTag("dst", fmt.Sprintf("%x",message.Dst))
+	span.SetTag("src", fmt.Sprintf("%x", message.Src))
+	span.SetTag("dst", fmt.Sprintf("%x", message.Dst))
 	reference := message.Operation.Reference
 	if reference != nil {
 		span.SetTag("reference", fmt.Sprintf("%d", *reference))
