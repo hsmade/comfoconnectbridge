@@ -59,33 +59,41 @@ func NewProxy(gatewayIP string, myMacAddress []byte) *Proxy {
 	prometheus.MustRegister(proxyMessagetoGateway)
 	prometheus.MustRegister(metricsGauge)
 
-	toGateway := make(chan comfoconnect.Message, 50)
+	listenerToGateway := make(chan comfoconnect.Message, 500)
 	prometheus.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-		Name: "comfoconnect_proxy_proxy_toGateway_queue_length",
-		Help: "The current number of items on toGateway queue.",
+		Name: "comfoconnect_proxy_listener_toGateway_queue_length",
+		Help: "The current number of items on listenerToGateway queue.",
 	}, func() float64 {
-		return float64(len(toGateway))
+		return float64(len(listenerToGateway))
 	}))
 
-	fromGateway := make(chan comfoconnect.Message, 50)
+	clientToGateway := make(chan comfoconnect.Message, 500)
+	prometheus.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "comfoconnect_proxy_client_toGateway_queue_length",
+		Help: "The current number of items on clientToGateway queue.",
+	}, func() float64 {
+		return float64(len(clientToGateway))
+	}))
+
+	clientFromGateway := make(chan comfoconnect.Message, 500)
 	prometheus.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 		Name: "comfoconnect_proxy_proxy_fromGateway_queue_length",
-		Help: "The current number of items on fromGateway queue.",
+		Help: "The current number of items on clientFromGateway queue.",
 	}, func() float64 {
-		return float64(len(fromGateway))
+		return float64(len(clientFromGateway))
 	}))
 
 	log.Info("creating new listener")
-	l := NewListener(toGateway)
+	l := NewListener(listenerToGateway)
 	log.Info("creating new client")
-	c := NewClient(gatewayIP, myMacAddress, toGateway, fromGateway)
+	c := NewClient(gatewayIP, myMacAddress, clientToGateway, clientFromGateway)
 
 	p := Proxy{
 		client:      c,
 		listener:    l,
 		uuid:        uuid,
-		toGateway:   toGateway,
-		fromGateway: fromGateway,
+		toGateway:   listenerToGateway,
+		fromGateway: clientFromGateway,
 	}
 
 	return &p
@@ -127,7 +135,6 @@ func (p Proxy) Run(ctx context.Context, wg *sync.WaitGroup) {
 			message.Span = span
 
 			generateMetrics(message)
-			message.Src = p.uuid // masquerade
 
 			log.WithField("span", span.Context().(jaeger.SpanContext).String()).Debugf("forwarding message to gateway: %v", message)
 			p.client.toGateway <- message
@@ -145,8 +152,13 @@ func (p Proxy) Run(ctx context.Context, wg *sync.WaitGroup) {
 
 			log.WithField("span", span.Context().(jaeger.SpanContext).String()).Debugf("going to copy to %d apps", len(p.listener.apps))
 			for _, app := range p.listener.apps {
+				logrus.Debugf("@@@ Proxy.p.fromGateway: %v", message)
+
+				message.Src = p.uuid // masquerade
 				message.Dst = app.uuid // masquerade
+				logrus.Debugf("@@@ Proxy.p.fromGateway2: %v", message)
 				log.Debugf("copying message from gateway to app(%s/%x):%v", app.conn.RemoteAddr().String(), app.uuid, message)
+
 				err := app.Write(message)
 				if err != nil {
 					log.Errorf("error while copying message from gateway to app(%s/%x):%v", app.conn.RemoteAddr().String(), app.uuid, err)

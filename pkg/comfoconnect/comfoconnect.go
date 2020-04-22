@@ -3,7 +3,6 @@ package comfoconnect
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"net"
 	"reflect"
@@ -31,10 +30,6 @@ type Message struct {
 }
 
 func GetMessageFromSocket(conn net.Conn) (Message, error) {
-	span := opentracing.StartSpan("comfoconnect.GetMessageFromSocket")
-	defer span.Finish()
-	span.SetTag("remote", conn.RemoteAddr().String())
-
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
 		"method": "GetMessageFromSocket",
@@ -43,18 +38,22 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 
 	var completeMessage []byte
 
-	lengthBytes, err := readBytes(conn, 4)
+	lengthBytes, err := ReadBytes(conn, 4)
 	if err != nil {
 		if opErr, ok := errors.Cause(err).(*net.OpError); ok && opErr.Timeout() {
 			// read timeout, silently ignore
-			span.SetTag("err", err)
+			//span.SetTag("err", err)
 			return Message{}, err
 		}
 		err := errors.Wrap(err, "reading message length")
 		log.Error(err)
-		span.SetTag("err", err)
+		//span.SetTag("err", err)
 		return Message{}, err
 	}
+	span := opentracing.StartSpan("comfoconnect.GetMessageFromSocket")
+	defer span.Finish()
+	span.SetTag("remote", conn.RemoteAddr().String())
+
 	completeMessage = append(completeMessage, lengthBytes...)
 	length := binary.BigEndian.Uint32(lengthBytes)
 
@@ -66,7 +65,7 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 	}
 	log.Trace("length: %d", length)
 
-	src, err := readBytes(conn, 16)
+	src, err := ReadBytes(conn, 16)
 	if err != nil {
 		err := errors.Wrap(err, "reading Src")
 		log.Error(err)
@@ -76,7 +75,7 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 	completeMessage = append(completeMessage, src...)
 	log.Trace("Src: %x", src)
 
-	dst, err := readBytes(conn, 16)
+	dst, err := ReadBytes(conn, 16)
 	if err != nil {
 		err := errors.Wrap(err, "reading Dst")
 		log.Error(err)
@@ -86,7 +85,7 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 	completeMessage = append(completeMessage, dst...)
 	log.Trace("Dst: %x", dst)
 
-	operationLengthBytes, err := readBytes(conn, 2)
+	operationLengthBytes, err := ReadBytes(conn, 2)
 	if err != nil {
 		err := errors.Wrap(err, "reading operation length")
 		log.Error(err)
@@ -95,7 +94,6 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 	}
 	completeMessage = append(completeMessage, operationLengthBytes...)
 	operationLength := binary.BigEndian.Uint16(operationLengthBytes)
-	operationLength = 4 // FIXME: sign error above?
 
 	if operationLength < 1 || operationLength > 1024 {
 		err := errors.New(fmt.Sprintf("got invalid operationLength: %d", operationLength))
@@ -105,7 +103,7 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 	}
 	log.Trace("operationLength: %d", operationLength)
 
-	operationBytes, err := readBytes(conn, int(operationLength))
+	operationBytes, err := ReadBytes(conn, int(operationLength))
 	if err != nil {
 		err := errors.Wrap(err, "reading operation")
 		log.Error(err)
@@ -120,7 +118,7 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 
 	if operationTypeLength > 0 {
 		log.Trace("operationTypeLength: %d", operationTypeLength)
-		operationTypeBytes, err = readBytes(conn, int(operationTypeLength))
+		operationTypeBytes, err = ReadBytes(conn, int(operationTypeLength))
 		if err != nil {
 			err := errors.Wrap(err, "reading operation type")
 			log.Error(err)
@@ -137,16 +135,16 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 		err := errors.Wrap(err, "failed to unmarshal operation")
 		log.Error(err)
 		span.SetTag("err", err)
-		return Message{}, err
+		return Message{RawMessage: completeMessage}, err
 	}
 
-	operationType := getStructForType(operation.Type.String())
+	operationType := GetStructForType(operation.Type.String())
 	err = operationType.XXX_Unmarshal(operationTypeBytes)
 	if err != nil {
 		err := errors.Wrap(err, "failed to unmarshal operation type") // FIXME
 		log.Error(err)
 		span.SetTag("err", err)
-		return Message{}, err
+		return Message{RawMessage: completeMessage}, err
 	}
 
 	message := Message{
@@ -158,42 +156,52 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 		Span:          span,
 	}
 
-	switch message.Operation.Type.String() {
-	case "CnRpdoNotificationType":
-		actual := message.OperationType.(*proto.CnRpdoNotification)
-		log.Debugf("Received Rpdo for ppid:%d with data:%x", *actual.Pdid, actual.Data)
-	case "CnRpdoRequestType":
-		actual := message.OperationType.(*proto.CnRpdoRequest)
-		log.Debugf("Received Rpdo request for ppid:%d", *actual.Pdid)
-	// TODO: decode RMI data ?
-	case "CnRmiRequestType":
-		actual := message.OperationType.(*proto.CnRmiRequest)
-		log.Debugf("Received Rmi request for node:%d with data:%x", *actual.NodeId, actual.Message)
-	case "CnRmiResponseType":
-		actual := message.OperationType.(*proto.CnRmiResponse)
-		log.Debugf("Received Rmi response with result:%d and data:%x", *actual.Result, actual.Message)
-	case "CnRmiAsyncRequestType":
-		actual := message.OperationType.(*proto.CnRmiAsyncRequest)
-		log.Debugf("Received Rmi async request for node:%d and data:%x", *actual.NodeId, actual.Message)
-	case "CnRmiAsyncResponseType":
-		actual := message.OperationType.(*proto.CnRmiAsyncResponse)
-		log.Debugf("Received Rmi async response with result:%d and data:%x", *actual.Result, actual.Message)
-	}
+	//switch message.Operation.Type.String() {
+	//case "CnRpdoNotificationType":
+	//	actual := message.OperationType.(*proto.CnRpdoNotification)
+	//	log.Debugf("Received Rpdo for ppid:%d with data:%x", *actual.Pdid, actual.Data)
+	//case "CnRpdoRequestType":
+	//	actual := message.OperationType.(*proto.CnRpdoRequest)
+	//	log.Debugf("Received Rpdo request for ppid:%d", *actual.Pdid)
+	//// TODO: decode RMI data ?
+	//case "CnRmiRequestType":
+	//	actual := message.OperationType.(*proto.CnRmiRequest)
+	//	log.Debugf("Received Rmi request for node:%d with data:%x", *actual.NodeId, actual.Message)
+	//case "CnRmiResponseType":
+	//	actual := message.OperationType.(*proto.CnRmiResponse)
+	//	log.Debugf("Received Rmi response with result:%d and data:%x", *actual.Result, actual.Message)
+	//case "CnRmiAsyncRequestType":
+	//	actual := message.OperationType.(*proto.CnRmiAsyncRequest)
+	//	log.Debugf("Received Rmi async request for node:%d and data:%x", *actual.NodeId, actual.Message)
+	//case "CnRmiAsyncResponseType":
+	//	actual := message.OperationType.(*proto.CnRmiAsyncResponse)
+	//	log.Debugf("Received Rmi async response with result:%d and data:%x", *actual.Result, actual.Message)
+	//}
 	SpanSetMessage(span, message)
 	return message, nil
 }
 
 func (m Message) String() string {
-	b, _ := json.Marshal(m)
-	return string(b)
+	if m.Operation.Type == nil {
+		return "Empty object"
+	}
+	var reference uint32
+	if m.Operation.Reference != nil {
+		reference = *m.Operation.Reference
+	}
+	result := fmt.Sprintf("Src=%x; Dst=%x; Cmd_type=%v; ref=%v; RawMessage=%x", m.Src, m.Dst, m.Operation.Type.String(), reference, m.RawMessage)
+
+	//b, _ := json.Marshal(m)
+	//result := string(b)
+	return result
 }
 
 // creates the correct response message as a byte slice, for the parent message
 func (m Message) CreateResponse(span opentracing.Span, status proto.GatewayOperation_GatewayResult) []byte {
 	if span == nil {
-		span = opentracing.StartSpan("comfoconnect.Message.CeateResponse")
+		span = opentracing.StartSpan("comfoconnect.Message.CreateResponse")
 	} else {
-		span = opentracing.GlobalTracer().StartSpan("comfoconnect.Message.CeateResponse", opentracing.ChildOf(span.Context()))
+		span = opentracing.GlobalTracer().StartSpan("comfoconnect.Message.CreateResponse", opentracing.ChildOf(span.Context()))
 	}
 	defer span.Finish()
 	span.SetTag("status", status)
@@ -205,19 +213,22 @@ func (m Message) CreateResponse(span opentracing.Span, status proto.GatewayOpera
 		//"span": span.Context().(jaeger.SpanContext).String(),
 	})
 
+	message := m
+	message.Src = m.Dst
+	message.Dst = m.Src
 	log.Debugf("creating response for operation type: %s", reflect.TypeOf(m.OperationType).Elem().Name())
-	responseType := getResponseTypeForOperationType(m.OperationType)
+	responseType := getResponseTypeForOperationType(message.OperationType)
 	span.SetTag("responseType", responseType.String())
 	operation := proto.GatewayOperation{
 		Type:      &responseType,
-		Reference: m.Operation.Reference,
+		Reference: message.Operation.Reference,
 		Result:    &status,
 	}
 	if status == -1 {
 		operation.Result = nil
 	}
 
-	responseStruct := getStructForType(responseType.String())
+	responseStruct := GetStructForType(responseType.String())
 	if responseStruct == nil {
 		err := errors.New(fmt.Sprint("unable to find struct for type: %s", responseType.String()))
 		log.Error(err)
@@ -267,7 +278,7 @@ func (m Message) CreateResponse(span opentracing.Span, status proto.GatewayOpera
 		}
 
 	}
-	result := m.packMessage(operation, responseStruct)
+	result := message.packMessage(operation, responseStruct)
 	span.SetTag("result", result)
 	return result
 }
@@ -330,7 +341,7 @@ func (m Message) Encode() []byte {
 }
 
 func (m Message) DecodePDO() RpdoTypeConverter {
-	if reflect.TypeOf(m).String() != "*proto.CnRpdoNotification" {
+	if m.Operation.Type.String() != "CnRpdoNotificationType" {
 		return nil
 	}
 	ppid := m.OperationType.(*proto.CnRpdoNotification).Pdid
@@ -339,10 +350,10 @@ func (m Message) DecodePDO() RpdoTypeConverter {
 }
 
 // take an IP address, and a MAC address to respond with and create search gateway response
-func CreateSearchGatewayResponse(ipAddress string, macAddress []byte) []byte {
+func CreateSearchGatewayResponse(ipAddress string, uuid []byte) []byte {
 	version := uint32(1)
-	uuid := []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x25, 0x10, 0x10, 0x80, 0x01} // uuid header
-	uuid = append(uuid, macAddress...)
+	//uuid := []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x25, 0x10, 0x10, 0x80, 0x01} // uuid header
+	//uuid = append(uuid, macAddress...)
 
 	resp := proto.SearchGatewayResponse{
 		Ipaddress:            &ipAddress,
@@ -358,10 +369,10 @@ func CreateSearchGatewayResponse(ipAddress string, macAddress []byte) []byte {
 }
 
 // takes the name for an operation type and finds the struct for it
-func getStructForType(operationTypeString string) OperationType {
+func GetStructForType(operationTypeString string) OperationType {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
-		"method": "getStructForType",
+		"method": "GetStructForType",
 	})
 
 	var operationType OperationType
@@ -581,10 +592,10 @@ func getResponseTypeForOperationType(operationType OperationType) proto.GatewayO
 	return responseTypeString
 }
 
-func readBytes(conn net.Conn, size int) ([]byte, error) {
+func ReadBytes(conn net.Conn, size int) ([]byte, error) {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
-		"method": "readBytes",
+		"method": "ReadBytes",
 		"size":   size,
 	})
 	log.Debugf("reading from %s", conn.RemoteAddr().String())

@@ -10,12 +10,12 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
+	"github.com/hsmade/comfoconnectbridge/pkg/dumbproxy"
 	"github.com/hsmade/comfoconnectbridge/pkg/instrumentation"
-	"github.com/hsmade/comfoconnectbridge/pkg/proxy"
 )
 
 func main() {
-	logrus.SetLevel(logrus.DebugLevel)
+	logrus.SetLevel(logrus.InfoLevel)
 	customFormatter := new(logrus.TextFormatter)
 	customFormatter.TimestampFormat = time.StampMilli
 	logrus.SetFormatter(customFormatter)
@@ -31,11 +31,22 @@ func main() {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
 
-	l := comfoconnect.NewBroadcastListener("192.168.178.52", []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x25, 0x10, 0x10, 0x80, 0x01, 0xb8, 0x27, 0xeb, 0xf9, 0xf9, 0x12})
+	gatewayUUID, err := comfoconnect.DiscoverGateway("192.168.0.19")
+	if err != nil {
+		logrus.Errorf("failed to discover gateway: %v", err)
+		return
+	}
+
+	logrus.Infof("got gateway UUID: %x", gatewayUUID)
+
+
+	l := comfoconnect.NewBroadcastListener("192.168.178.52", []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x33, 0x10, 0x13, 0x80, 0x01, 0x14, 0x4f, 0xd7, 0x1e, 0x23, 0xe6})
 	go l.Run()
 	defer l.Stop()
 
-	p := proxy.NewProxy("192.168.0.19", []byte{0xb8, 0x27, 0xeb, 0xf9, 0xf9, 0x12})
+	p := dumbproxy.DumbProxy{
+		GatewayIP: "192.168.0.19",
+	}
 	go p.Run(ctx, wg)
 
 	logrus.Info("waiting for ctrl-c")

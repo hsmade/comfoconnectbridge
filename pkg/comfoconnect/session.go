@@ -27,10 +27,13 @@ func NewSession(ctx context.Context, wg *sync.WaitGroup, comfoConnectIP string, 
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
 		"method": "NewSession",
+		"comfoConnectIP": comfoConnectIP,
+		"pin": pin,
+		"src": src,
 	})
 
 	// first ping the gateway to get its UUID
-	dst, err := discoverGateway(comfoConnectIP)
+	dst, err := DiscoverGateway(comfoConnectIP)
 	if err != nil {
 		log.Errorf("failed to discover gateway: %v", err)
 		return nil, errors.Wrap(err, "discovering gateway")
@@ -172,10 +175,10 @@ func (s *Session) keepAlive(ctx context.Context, wg *sync.WaitGroup) {
 	}
 }
 // send a UDP packet to `ip` and expect a searchGatewayResponse with the uuid
-func discoverGateway(ip string) (uuid []byte, err error) {
+func DiscoverGateway(ip string) (uuid []byte, err error) {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
-		"method": "discoverGateway",
+		"method": "DiscoverGateway",
 	})
 
 	raddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:56747", ip))
@@ -238,7 +241,7 @@ func (s *Session) Close() {
 }
 
 func (s *Session) Receive() (Message, error) {
-	s.Conn.SetReadDeadline(time.Now().Add(time.Second * 1))
+	s.Conn.SetReadDeadline(time.Now().Add(time.Millisecond * 300))
 	m, err := GetMessageFromSocket(s.Conn)
 	return m, err
 }

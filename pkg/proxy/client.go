@@ -52,6 +52,7 @@ type Client struct {
 func NewClient(ip string, macAddress []byte, toGateway chan comfoconnect.Message, fromGateway chan comfoconnect.Message) *Client {
 	uuid := []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x25, 0x10, 0x10, 0x80, 0x01} // uuid header
 	uuid = append(uuid, macAddress...)
+	//uuid = []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05}
 
 	prometheus.MustRegister(clientConnected)
 	prometheus.MustRegister(clientMessagefromGateway)
@@ -94,9 +95,16 @@ func (c Client) Run(ctx context.Context, wg *sync.WaitGroup) error {
 
 		case message := <-c.toGateway:
 			clientMessagetoGateway.WithLabelValues(message.Operation.Type.String()).Inc()
+
+			message.Src = c.uuid // masquerade
+			message.Dst = c.session.Dst // masquerade
+
 			span := opentracing.GlobalTracer().StartSpan("proxy.Client.Run.toGateway", opentracing.ChildOf(message.Span.Context()))
 			comfoconnect.SpanSetMessage(span, message)
 			message.Span = span
+
+			message.Src = c.uuid // masquerade
+			message.Dst = c.session.Dst // masquerade
 
 			log.WithField("span", span.Context().(jaeger.SpanContext).String()).Debugf("sending message to gateway: %v", message)
 			err := c.session.Send(message)

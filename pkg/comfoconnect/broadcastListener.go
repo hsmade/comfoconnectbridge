@@ -12,13 +12,13 @@ import (
 
 type BroadcastListener struct {
 	ResponseIP string
-	myMAC      []byte
+	myUUID     []byte
 	listener   *net.UDPConn
 	quit       chan bool
 	exited     chan bool
 }
 
-func NewBroadcastListener(myIP string, myMacAddress []byte) *BroadcastListener {
+func NewBroadcastListener(myIP string, myUUID []byte) *BroadcastListener {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "proxy",
 		"method": "NewBroadcastListener",
@@ -36,7 +36,7 @@ func NewBroadcastListener(myIP string, myMacAddress []byte) *BroadcastListener {
 
 	l := BroadcastListener{
 		ResponseIP: myIP,
-		myMAC:      myMacAddress,
+		myUUID:     myUUID,
 		listener:   listener,
 		quit:       make(chan bool),
 		exited:     make(chan bool),
@@ -104,7 +104,7 @@ func (l *BroadcastListener) handleConnection(addr *net.UDPAddr) error {
 	})
 
 	log.Debug("writing searchGatewayResponse")
-	_, err := l.listener.WriteToUDP(CreateSearchGatewayResponse(l.ResponseIP, l.myMAC), addr)
+	_, err := l.listener.WriteToUDP(CreateSearchGatewayResponse(l.ResponseIP, l.myUUID), addr)
 	if err != nil {
 		log.Errorf("Failed to respond to SearchGatewayRequest: %v", err)
 		return errors.Wrap(err, "responding to SearchGatewayRequest")

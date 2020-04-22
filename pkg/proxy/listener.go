@@ -151,7 +151,7 @@ func (a *App) HandleConnection(ctx context.Context, wg *sync.WaitGroup, gateway 
 
 	log.Infof("handling connection from: %s", a.conn.RemoteAddr().String())
 
-	messageChannel := make(chan comfoconnect.Message, 10)
+	messageChannel := make(chan comfoconnect.Message, 500)
 	//prometheus.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 	//	Name: "comfoconnect_proxy_listener_messageChannel_queue",
 	//	Help: "The current number of items on messageChannel queue.",
@@ -168,7 +168,7 @@ func (a *App) HandleConnection(ctx context.Context, wg *sync.WaitGroup, gateway 
 				wg.Done()
 				return
 			default:
-				err := a.conn.SetReadDeadline(time.Now().Add(time.Millisecond * 100))
+				err := a.conn.SetReadDeadline(time.Now().Add(time.Millisecond * 300))
 				if err != nil {
 					log.Warnf("failed to set readDeadline: %v", err)
 				}
@@ -199,6 +199,7 @@ func (a *App) HandleConnection(ctx context.Context, wg *sync.WaitGroup, gateway 
 			span := opentracing.GlobalTracer().StartSpan("proxy.App.HandleConnection.ReceivedMessage", opentracing.ChildOf(message.Span.Context()))
 			comfoconnect.SpanSetMessage(span, message)
 			log.WithField("span",span.Context().(jaeger.SpanContext).String()).Debugf("got a message from app(%s): %v", a.conn.RemoteAddr(), message)
+			a.uuid = message.Src
 			a.handleMessage(message, gateway)
 			span.Finish()
 		}
@@ -274,8 +275,12 @@ func (a *App) handleMessage(message comfoconnect.Message, gateway chan comfoconn
 func (a *App) Write(message comfoconnect.Message) error {
 	messageSentCount.WithLabelValues(message.Operation.Type.String()).Inc()
 	span := opentracing.GlobalTracer().StartSpan("proxy.App.Write")
+	comfoconnect.SpanSetMessage(span, message)
 	defer span.Finish()
-	length, err := a.conn.Write(message.Encode())
+	logrus.Debugf("@@@ App.Write: %v", message)
+	e := message.Encode()
+	logrus.Debugf("@@@ App.Write.encode: %x to %s", e, a.conn.RemoteAddr().String())
+	length, err := a.conn.Write(e)
 	span.SetTag("length", length)
 	return err
 }
