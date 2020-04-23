@@ -316,7 +316,7 @@ func generateMetrics(message comfoconnect.Message) {
 	switch message.Operation.Type.String() {
 	case "CnRpdoNotificationType":
 		conv := message.DecodePDO()
-		log.Infof("Got RPDO: %s %v", reflect.TypeOf(conv), conv)
+		log.Infof("Got RPDO: %s %v with value %f", reflect.TypeOf(conv), conv, conv.Tofloat64())
 		metricsGauge.WithLabelValues(conv.GetID(), conv.GetDescription()).Set(conv.Tofloat64())
 	case "CnAlarmNotificationType":
 		log.Warnf("Got alarm notification: %v", message)
