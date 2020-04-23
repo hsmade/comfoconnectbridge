@@ -25,11 +25,11 @@ type Session struct {
 
 func NewSession(ctx context.Context, wg *sync.WaitGroup, comfoConnectIP string, pin uint32, src []byte) (*Session, error) {
 	log := logrus.WithFields(logrus.Fields{
-		"module": "comfoconnect",
-		"method": "NewSession",
+		"module":         "comfoconnect",
+		"method":         "NewSession",
 		"comfoConnectIP": comfoConnectIP,
-		"pin": pin,
-		"src": src,
+		"pin":            pin,
+		"src":            src,
 	})
 
 	// first ping the gateway to get its UUID
@@ -144,17 +144,17 @@ func (s *Session) keepAlive(ctx context.Context, wg *sync.WaitGroup) {
 	reference := uint32(50)
 	for {
 		select {
-		case <- ctx.Done():
+		case <-ctx.Done():
 			wg.Done()
 			return
 		case <-ticker.C:
 			log.Debug("sending keep alive")
 			operationType := proto.GatewayOperation_CnTimeRequestType
 			m := Message{
-				Src:           s.Src,
-				Dst:           s.Dst,
-				Operation:     proto.GatewayOperation{
-					Type: &operationType,
+				Src: s.Src,
+				Dst: s.Dst,
+				Operation: proto.GatewayOperation{
+					Type:      &operationType,
 					Reference: &reference,
 				},
 				OperationType: &proto.CnTimeRequest{},
@@ -167,13 +167,14 @@ func (s *Session) keepAlive(ctx context.Context, wg *sync.WaitGroup) {
 				}
 				log.Errorf("keepalive got error: %v", err)
 			}
-			reference ++
+			reference++
 			if reference > 1024 {
 				reference = 1
 			}
 		}
 	}
 }
+
 // send a UDP packet to `ip` and expect a searchGatewayResponse with the uuid
 func DiscoverGateway(ip string) (uuid []byte, err error) {
 	log := logrus.WithFields(logrus.Fields{
@@ -247,10 +248,16 @@ func (s *Session) Receive() (Message, error) {
 }
 
 func (s *Session) Send(message Message) error {
+	log := logrus.WithFields(logrus.Fields{
+		"module": "comfoconnect",
+		"object": "Session",
+		"method": "Send",
+	})
 	span := opentracing.GlobalTracer().StartSpan("comfoconnect.Session.Send", opentracing.ChildOf(message.Span.Context()))
 	defer span.Finish()
 	SpanSetMessage(span, message)
-	len, err := s.Conn.Write(message.Encode())
-	span.SetTag("written", len)
+	length, err := s.Conn.Write(message.Encode())
+	log.Infof("Wrote %d bytes to gateway. err:%v bytes:%x message:%v", length, err, message.Encode(), message)
+	span.SetTag("written", length)
 	return err
 }

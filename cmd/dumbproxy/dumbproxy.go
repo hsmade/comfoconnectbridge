@@ -15,7 +15,7 @@ import (
 )
 
 func main() {
-	logrus.SetLevel(logrus.InfoLevel)
+	logrus.SetLevel(logrus.WarnLevel)
 	customFormatter := new(logrus.TextFormatter)
 	customFormatter.TimestampFormat = time.StampMilli
 	logrus.SetFormatter(customFormatter)
@@ -40,7 +40,7 @@ func main() {
 	logrus.Infof("got gateway UUID: %x", gatewayUUID)
 
 
-	l := comfoconnect.NewBroadcastListener("192.168.178.52", []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x33, 0x10, 0x13, 0x80, 0x01, 0x14, 0x4f, 0xd7, 0x1e, 0x23, 0xe6})
+	l := comfoconnect.NewBroadcastListener("192.168.178.52", gatewayUUID)
 	go l.Run()
 	defer l.Stop()
 

@@ -273,14 +273,18 @@ func (a *App) handleMessage(message comfoconnect.Message, gateway chan comfoconn
 }
 
 func (a *App) Write(message comfoconnect.Message) error {
+	log := logrus.WithFields(logrus.Fields{
+		"module": "proxy",
+		"object": "App",
+		"method": "Write",
+	})
 	messageSentCount.WithLabelValues(message.Operation.Type.String()).Inc()
 	span := opentracing.GlobalTracer().StartSpan("proxy.App.Write")
 	comfoconnect.SpanSetMessage(span, message)
 	defer span.Finish()
-	logrus.Debugf("@@@ App.Write: %v", message)
 	e := message.Encode()
-	logrus.Debugf("@@@ App.Write.encode: %x to %s", e, a.conn.RemoteAddr().String())
 	length, err := a.conn.Write(e)
+	log.Infof("Wrote %d bytes to app. err:%v bytes:%x message:%v", length, err, message.Encode(), message)
 	span.SetTag("length", length)
 	return err
 }

@@ -2,7 +2,6 @@ package dumbproxy
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
@@ -16,7 +15,6 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
-	"github.com/hsmade/comfoconnectbridge/proto"
 )
 
 var (
@@ -28,6 +26,7 @@ var (
 		[]string{"ID", "description"},
 	)
 )
+
 type DumbProxy struct {
 	GatewayIP string
 }
@@ -39,7 +38,6 @@ func (d DumbProxy) Run(ctx context.Context, wg *sync.WaitGroup) {
 		"method": "Run",
 	})
 	prometheus.MustRegister(metricsGauge)
-
 
 	log.Info("starting proxy")
 
@@ -81,59 +79,14 @@ func (d DumbProxy) Run(ctx context.Context, wg *sync.WaitGroup) {
 			}
 			log.Debugf("connected to %s", gatewayConnection.RemoteAddr())
 
-			//wg.Add(1)
-			//go d.handleClient(ctx, wg, listenerConnection, gatewayConnection)
 			listenerChan := make(chan []byte, 100)
 			gatewayChannel := make(chan []byte, 100)
 
-			go d.proxyReceiveMessage(listenerConnection, listenerChan)
-			go d.proxyReceiveMessage(gatewayConnection, gatewayChannel)
-			go d.proxySend(gatewayConnection, listenerChan)
-			go d.proxySend(listenerConnection, gatewayChannel)
-		}
-	}
-}
+			go d.proxyReceiveMessage(listenerConnection, listenerChan) // app - > chan
+			go d.proxySend(listenerConnection, gatewayChannel)         // chan -> app
 
-func (d DumbProxy) proxyReceiveBytes(conn net.Conn, channel chan []byte) {
-	log := logrus.WithFields(logrus.Fields{
-		"module": "dumbproxy",
-		"object": "DumbProxy",
-		"method": "proxyReceive",
-	})
-	for {
-		err := conn.SetReadDeadline(time.Now().Add(time.Millisecond * 10))
-		if err != nil {
-			log.Warnf("failed to set readDeadline: %v", err)
-		}
-
-		b := make([]byte, 4096)
-		length, err := conn.Read(b)
-		if err == nil {
-			log.Infof("received %d bytes: %x from %s", length, b[:length], conn.RemoteAddr().String())
-				channel <- b[:length]
-		//} else {
-		//	log.Debugf("receive err: %v", err)
-		}
-	}
-}
-
-func (d DumbProxy) proxyReceiveBinaryMessage(conn net.Conn, channel chan []byte) {
-	log := logrus.WithFields(logrus.Fields{
-		"module": "dumbproxy",
-		"object": "DumbProxy",
-		"method": "proxyReceive",
-	})
-	for {
-		err := conn.SetReadDeadline(time.Now().Add(time.Millisecond * 100))
-		if err != nil {
-			log.Warnf("failed to set readDeadline: %v", err)
-		}
-
-		message := ReadMessage(conn)
-		if message != nil && len(message) > 0 {
-			log.Infof("received %d bytes: %x from %s", len(message), message, conn.RemoteAddr().String())
-			channel <- message
-
+			go d.proxyReceiveMessage(gatewayConnection, gatewayChannel) // gw   -> chan
+			go d.proxySend(gatewayConnection, listenerChan)             // chan -> gw
 		}
 	}
 }
@@ -174,7 +127,7 @@ func (d DumbProxy) proxySend(conn net.Conn, channel chan []byte) {
 		"method": "proxySend",
 	})
 	for {
-		b := <- channel
+		b := <-channel
 		length, err := conn.Write(b)
 		if err == nil {
 			log.Infof("sent %d bytes: %x to %s", length, b[:length], conn.RemoteAddr().String())
@@ -182,128 +135,6 @@ func (d DumbProxy) proxySend(conn net.Conn, channel chan []byte) {
 			log.Debugf("send err: %v", err)
 		}
 	}
-}
-
-
-func ReadMessage(conn net.Conn) []byte {
-	log := logrus.WithFields(logrus.Fields{
-		"module": "dumbproxy",
-		"object": "DumbProxy",
-		"method": "ReadMessage",
-	})
-	var completeMessage []byte
-
-	lengthBytes, _ := ReadBytes(conn, 4)
-	if len(lengthBytes) < 4 {
-		return nil
-	}
-	completeMessage = append(completeMessage, lengthBytes...)
-	length := binary.BigEndian.Uint32(lengthBytes)
-
-	src, err := ReadBytes(conn, 16)
-	if err != nil {
-		log.Errorf("src: %v", err)
-		return nil
-	}
-	completeMessage = append(completeMessage, src...)
-
-	dst, err := ReadBytes(conn, 16)
-	if err != nil {
-		log.Errorf("dst: %v", err)
-		return nil
-	}
-	completeMessage = append(completeMessage, dst...)
-
-	operationLengthBytes, err := ReadBytes(conn, 2)
-	if err != nil {
-		log.Errorf("operationLengthBytes: %v", err)
-		return nil
-	}
-	completeMessage = append(completeMessage, operationLengthBytes...)
-	operationLength := binary.BigEndian.Uint16(operationLengthBytes)
-	//operationLength = 4 // FIXME: sign error above?
-
-	operationBytes, err := ReadBytes(conn, int(operationLength))
-	if err != nil {
-		log.Errorf("operationBytes: %v", err)
-		return nil
-	}
-	completeMessage = append(completeMessage, operationBytes...)
-
-	var operationTypeBytes []byte
-	operationTypeLength := (length - 34) - uint32(operationLength)
-	if operationTypeLength > 0 {
-		operationTypeBytes, err = ReadBytes(conn, int(operationTypeLength))
-		if err != nil {
-			log.Errorf("operationTypeBytes: %v", err)
-			return nil
-		}
-		completeMessage = append(completeMessage, operationTypeBytes...)
-	}
-
-	log.Infof("%x", completeMessage)
-	operation := proto.GatewayOperation{} // FIXME: parse instead of assume
-	err = operation.XXX_Unmarshal(operationBytes)
-	if err != nil {
-		err := errors.Wrap(err, fmt.Sprintf("failed to unmarshal operation with bytes(%d): %x", operationLength, operationBytes))
-		log.Error(err)
-		//return nil
-	}
-
-	operationType := comfoconnect.GetStructForType(operation.Type.String())
-	err = operationType.XXX_Unmarshal(operationTypeBytes)
-	if err != nil {
-		err := errors.Wrap(err, "failed to unmarshal operation type") // FIXME
-		log.Error(err)
-		//return nil
-	}
-
-	message := comfoconnect.Message{
-		Src:           src,
-		Dst:           dst,
-		Operation:     operation,
-		RawMessage:    completeMessage,
-		OperationType: operationType,
-	}
-
-	//log.Infof(message.Operation.Type.String())
-	//log.Infof(fmt.Sprintf("%x", message.Src))
-	//log.Infof(fmt.Sprintf("%x", message.Dst))
-	//log.Infof(fmt.Sprintf("%v", operationType))
-	log.Infof(message.String())
-
-	//return completeMessage
-	return message.Encode()
-
-}
-
-func ReadBytes(conn net.Conn, size int) ([]byte, error) {
-	if size < 1 {
-		err := errors.New(fmt.Sprintf("Invalid size: %d", size))
-		return nil, err
-	}
-	var result []byte
-	for {
-		buffer := make([]byte, size)
-		readLen, err := conn.Read(buffer)
-		if err != nil {
-			return nil, errors.Wrap(err, "reading from socket")
-		}
-
-		if readLen > 0 {
-			size -= readLen
-			result = append(result, buffer[:readLen]...)
-		}
-
-		if size == 0 {
-			break
-		}
-
-		if size < 0 {
-			return nil, errors.New("read too many bytes: size")
-		}
-	}
-	return result, nil
 }
 
 func generateMetrics(message comfoconnect.Message) {

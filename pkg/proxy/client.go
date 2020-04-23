@@ -141,7 +141,7 @@ func (c Client) Run(ctx context.Context, wg *sync.WaitGroup) error {
 			message.Span = span
 
 			switch message.Operation.Type.String() {
-			case "CnTimeConfirmType":
+			//case "CnTimeConfirmType":
 				// ignore these, they're part of the keep-alive that the client does
 			default:
 				log.WithField("span", span.Context().(jaeger.SpanContext).String()).Debugf("sending message back to proxy: %v", message)

@@ -152,13 +152,9 @@ func (p Proxy) Run(ctx context.Context, wg *sync.WaitGroup) {
 
 			log.WithField("span", span.Context().(jaeger.SpanContext).String()).Debugf("going to copy to %d apps", len(p.listener.apps))
 			for _, app := range p.listener.apps {
-				logrus.Debugf("@@@ Proxy.p.fromGateway: %v", message)
-
 				message.Src = p.uuid // masquerade
 				message.Dst = app.uuid // masquerade
-				logrus.Debugf("@@@ Proxy.p.fromGateway2: %v", message)
 				log.Debugf("copying message from gateway to app(%s/%x):%v", app.conn.RemoteAddr().String(), app.uuid, message)
-
 				err := app.Write(message)
 				if err != nil {
 					log.Errorf("error while copying message from gateway to app(%s/%x):%v", app.conn.RemoteAddr().String(), app.uuid, err)
