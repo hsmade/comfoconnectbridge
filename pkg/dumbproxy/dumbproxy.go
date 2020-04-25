@@ -15,6 +15,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
+	"github.com/hsmade/comfoconnectbridge/proto"
 )
 
 var (
@@ -145,6 +146,9 @@ func generateMetrics(message comfoconnect.Message) {
 	})
 
 	switch message.Operation.Type.String() {
+	case "CnRpdoRequestType":
+		b := message.OperationType.(*proto.CnRpdoRequest)
+		log.Infof("CnRpdoRequestType: ppid:%d type:%d zone:%d", *b.Pdid, *b.Type, *b.Zone)
 	case "CnRpdoNotificationType":
 		conv := message.DecodePDO()
 		log.Infof("Got RPDO: %s %v with value %f", reflect.TypeOf(conv), conv, conv.Tofloat64())

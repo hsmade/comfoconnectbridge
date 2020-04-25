@@ -15,7 +15,7 @@ import (
 )
 
 func main() {
-	logrus.SetLevel(logrus.WarnLevel)
+	logrus.SetLevel(logrus.DebugLevel)
 	customFormatter := new(logrus.TextFormatter)
 	customFormatter.TimestampFormat = time.StampMilli
 	logrus.SetFormatter(customFormatter)
@@ -26,7 +26,7 @@ func main() {
 
 	closer := instrumentation.EnableTracing("proxy", "tower:5775")
 	defer closer.Close()
-	instrumentation.EnableMetrics()
+	//instrumentation.EnableMetrics()
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
@@ -38,7 +38,6 @@ func main() {
 	}
 
 	logrus.Infof("got gateway UUID: %x", gatewayUUID)
-
 
 	l := comfoconnect.NewBroadcastListener("192.168.178.52", gatewayUUID)
 	go l.Run()
