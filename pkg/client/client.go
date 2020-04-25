@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"reflect"
 	"time"
 
@@ -66,7 +65,8 @@ func (c *Client) startSession(ctx context.Context) {
 	connection, err := net.Dial("tcp", fmt.Sprintf("%s:56747", c.GatewayIP))
 	if err != nil {
 		log.Errorf("connect to gw: %v", err)
-		os.Exit(-1)
+		//os.Exit(-1)
+		time.Sleep(5 * time.Second)
 		return
 	}
 	log.Infof("connected to %s", connection.RemoteAddr())
