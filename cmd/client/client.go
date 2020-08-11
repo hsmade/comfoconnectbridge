@@ -15,7 +15,7 @@ import (
 )
 
 func main() {
-	logrus.SetLevel(logrus.DebugLevel)
+	logrus.SetLevel(logrus.InfoLevel)
 	customFormatter := new(logrus.TextFormatter)
 	customFormatter.TimestampFormat = time.StampMilli
 	logrus.SetFormatter(customFormatter)

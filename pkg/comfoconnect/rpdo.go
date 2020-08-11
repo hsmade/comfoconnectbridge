@@ -46,7 +46,11 @@ type RpdoType1 struct {
 }
 
 func (r RpdoType1) Tofloat64() float64 {
-	return float64(int(r.rawValue[0]))
+	value := int(r.rawValue[0])
+	if len(r.rawValue) > 1 {
+		value += int(r.rawValue[1]) * 256
+	}
+	return float64(value)
 }
 
 type RpdoType2 struct {
@@ -92,12 +96,18 @@ func NewPpid(ppid uint32, data []byte) RpdoTypeConverter {
 		return RpdoType1{rpdoType{ppid,"Unknown"}, data}
 	case 37:
 		return RpdoType1{rpdoType{ppid,"Unknown"}, data}
+	case 42:
+		return RpdoType1{rpdoType{ppid,"Unknown"}, data}
 	case 49:
 		return RpdoType1{rpdoType{ppid,"Operating mode1"}, data}
 	case 53:
 		return RpdoType1{rpdoType{ppid,"Unknown"}, data}
 	case 56:
 		return RpdoType1{rpdoType{ppid,"Operating mode2"}, data}
+	case 57:
+		return RpdoType1{rpdoType{ppid,"Unknown"}, data}
+	case 58:
+		return RpdoType1{rpdoType{ppid,"Unknown"}, data}
 	case 65:
 		return RpdoType1{rpdoType{ppid,"Fans: Fan speed setting"}, data}
 	case 66:
@@ -108,16 +118,24 @@ func NewPpid(ppid uint32, data []byte) RpdoTypeConverter {
 		return RpdoType1{rpdoType{ppid,"Unknown"}, data}
 	case 71:
 		return RpdoType1{rpdoType{ppid,"Unknown"}, data}
+	case 73:
+		return RpdoType1{rpdoType{ppid,"Unknown"}, data}
+	case 74:
+		return RpdoType1{rpdoType{ppid,"Unknown"}, data}
 	case 81:
 		return RpdoType3{rpdoType{ppid,"General: Countdown until next fan speed change"}, data}
 	case 82:
-		return RpdoType1{rpdoType{ppid,"Unknown"}, data}
+		return RpdoType3{rpdoType{ppid,"Unknown"}, data}
 	case 85:
-		return RpdoType1{rpdoType{ppid,"Unknown"}, data}
+		return RpdoType3{rpdoType{ppid,"Unknown"}, data}
 	case 86:
-		return RpdoType1{rpdoType{ppid,"Unknown"}, data}
+		return RpdoType3{rpdoType{ppid,"Unknown"}, data}
 	case 87:
-		return RpdoType1{rpdoType{ppid,"Unknown"}, data}
+		return RpdoType3{rpdoType{ppid,"Unknown"}, data}
+	case 89:
+		return RpdoType3{rpdoType{ppid,"Unknown"}, data}
+	case 90:
+		return RpdoType3{rpdoType{ppid,"Unknown"}, data}
 	case 117:
 		return RpdoType1{rpdoType{ppid,"Fans: Exhaust fan duty"}, data}
 	case 118:
