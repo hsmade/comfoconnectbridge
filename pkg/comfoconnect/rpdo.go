@@ -145,9 +145,9 @@ func NewPpid(ppid uint32, data []byte) RpdoTypeConverter {
 	case 120:
 		return RpdoType1{rpdoType{ppid,"Fans: Supply fan flow"}, data}
 	case 121:
-		return RpdoType2{rpdoType{ppid,"Fans: Exhaust fan speed"}, data}
+		return RpdoType1{rpdoType{ppid,"Fans: Exhaust fan speed"}, data}
 	case 122:
-		return RpdoType2{rpdoType{ppid,"Fans: Supply fan speed"}, data}
+		return RpdoType1{rpdoType{ppid,"Fans: Supply fan speed"}, data}
 	case 128:
 		return RpdoType1{rpdoType{ppid,"Power Consumption: Current Ventilation"}, data}
 	case 129:
