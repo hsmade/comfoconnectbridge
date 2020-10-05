@@ -15,7 +15,7 @@ import (
 )
 
 func main() {
-	logrus.SetLevel(logrus.InfoLevel)
+	logrus.SetLevel(logrus.TraceLevel)
 	customFormatter := new(logrus.TextFormatter)
 	customFormatter.TimestampFormat = time.StampMilli
 	logrus.SetFormatter(customFormatter)
@@ -138,7 +138,7 @@ func main() {
 	c.Run(ctx)
 
 	logrus.Info("waiting for ctrl-signalChannel")
-	for _ = range signalChannel {
+	for range signalChannel {
 		logrus.Info("closing down")
 		cancel()
 		os.Exit(0)

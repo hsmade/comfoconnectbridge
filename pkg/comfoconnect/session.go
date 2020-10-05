@@ -8,12 +8,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/google/uuid"
 	"github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
-	"github.com/hsmade/comfoconnectbridge/proto"
+	"github.com/hsmade/comfoconnectbridge/pb"
 )
 
 type Session struct {
@@ -57,15 +58,15 @@ func NewSession(ctx context.Context, wg *sync.WaitGroup, comfoConnectIP string, 
 	// send a registration request
 	deviceName := "Proxy"
 	reference := uint32(1)
-	operationType := proto.GatewayOperation_RegisterAppRequestType
+	operationType := pb.GatewayOperation_RegisterAppRequestType
 	m := Message{
 		Src: src,
 		Dst: dst,
-		Operation: proto.GatewayOperation{
+		Operation: &pb.GatewayOperation{
 			Type:      &operationType,
 			Reference: &reference,
 		},
-		OperationType: &proto.RegisterAppRequest{
+		OperationType: &pb.RegisterAppRequest{
 			Uuid:       src,
 			Pin:        &pin,
 			Devicename: &deviceName,
@@ -94,15 +95,15 @@ func NewSession(ctx context.Context, wg *sync.WaitGroup, comfoConnectIP string, 
 
 	// send a start session request
 	reference++
-	operationType = proto.GatewayOperation_StartSessionRequestType
+	operationType = pb.GatewayOperation_StartSessionRequestType
 	_, err = conn.Write(Message{
 		Src: src,
 		Dst: dst,
-		Operation: proto.GatewayOperation{
+		Operation: &pb.GatewayOperation{
 			Type:      &operationType,
 			Reference: &reference,
 		},
-		OperationType: &proto.StartSessionRequest{},
+		OperationType: &pb.StartSessionRequest{},
 	}.Encode())
 	if err != nil {
 		log.Errorf("failed to send StartSessionRequest: %v", err)
@@ -149,15 +150,15 @@ func (s *Session) keepAlive(ctx context.Context, wg *sync.WaitGroup) {
 			return
 		case <-ticker.C:
 			log.Debug("sending keep alive")
-			operationType := proto.GatewayOperation_CnTimeRequestType
+			operationType := pb.GatewayOperation_CnTimeRequestType
 			m := Message{
 				Src: s.Src,
 				Dst: s.Dst,
-				Operation: proto.GatewayOperation{
+				Operation: &pb.GatewayOperation{
 					Type:      &operationType,
 					Reference: &reference,
 				},
-				OperationType: &proto.CnTimeRequest{},
+				OperationType: &pb.CnTimeRequest{},
 			}
 			_, err := s.Conn.Write(m.Encode())
 			if err != nil {
@@ -209,8 +210,9 @@ func DiscoverGateway(ip string) (uuid []byte, err error) {
 		log.Errorf("could read message from gateway address %s: %v", ip, err)
 		return nil, errors.Wrap(err, fmt.Sprintf("reading message from gateway address: %s", ip))
 	}
-	response := proto.SearchGatewayResponse{}
-	err = response.XXX_Unmarshal(buf[2:])
+	response := pb.SearchGatewayResponse{}
+	err = proto.Unmarshal(buf[2:], &response)
+	//err = response.XXX_Unmarshal(buf[2:])
 	//if err != nil {
 	//	return nil, errors.Wrap(err, fmt.Sprintf("marshalling message from gateway address: %s", ip))
 	//}
@@ -229,20 +231,20 @@ func (s *Session) Close() {
 
 	log.Debug("sending CloseSessionRequest")
 	reference := uint32(1)
-	operationType := proto.GatewayOperation_CloseSessionRequestType
+	operationType := pb.GatewayOperation_CloseSessionRequestType
 	_, _ = s.Conn.Write(Message{
 		Src: s.Src,
 		Dst: s.Dst,
-		Operation: proto.GatewayOperation{
+		Operation: &pb.GatewayOperation{
 			Type:      &operationType,
 			Reference: &reference,
 		},
-		OperationType: &proto.CloseSessionRequest{},
+		OperationType: &pb.CloseSessionRequest{},
 	}.Encode())
 }
 
 func (s *Session) Receive() (Message, error) {
-	s.Conn.SetReadDeadline(time.Now().Add(time.Millisecond * 300))
+	_ = s.Conn.SetReadDeadline(time.Now().Add(time.Millisecond * 300))
 	m, err := GetMessageFromSocket(s.Conn)
 	return m, err
 }

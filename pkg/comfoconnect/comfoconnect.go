@@ -8,22 +8,25 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
-	"github.com/hsmade/comfoconnectbridge/proto"
+	"github.com/hsmade/comfoconnectbridge/pb"
 )
 
-type OperationType interface { // FIXME: rename
-	XXX_Unmarshal([]byte) error
-	XXX_Marshal(b []byte, deterministic bool) ([]byte, error)
-}
+type OperationType proto.Message
+//type OperationType interface { // FIXME: rename
+//	proto.Message
+//	XXX_Unmarshal([]byte) error
+//	XXX_Marshal(b []byte, deterministic bool) ([]byte, error)
+//}
 
 type Message struct {
 	Src           []byte
 	Dst           []byte
-	Operation     proto.GatewayOperation
+	Operation     *pb.GatewayOperation
 	RawMessage    []byte
 	OperationType OperationType
 	Span          opentracing.Span
@@ -129,8 +132,8 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 		log.Trace("operationTypeBytes: %x", operationTypeBytes)
 	}
 
-	operation := proto.GatewayOperation{} // FIXME: parse instead of assume
-	err = operation.XXX_Unmarshal(operationBytes)
+	operation := pb.GatewayOperation{} // FIXME: parse instead of assume
+	err = proto.Unmarshal(operationBytes, &operation)
 	if err != nil {
 		err := errors.Wrap(err, "failed to unmarshal operation")
 		log.Error(err)
@@ -139,7 +142,7 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 	}
 
 	operationType := GetStructForType(operation.Type.String())
-	err = operationType.XXX_Unmarshal(operationTypeBytes)
+	err = proto.Unmarshal(operationBytes, operationType)
 	if err != nil {
 		err := errors.Wrap(err, "failed to unmarshal operation type") // FIXME
 		log.Error(err)
@@ -150,7 +153,7 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 	message := Message{
 		Src:           src,
 		Dst:           dst,
-		Operation:     operation,
+		Operation:     &operation,
 		RawMessage:    completeMessage,
 		OperationType: operationType,
 		Span:          span,
@@ -197,7 +200,7 @@ func (m Message) String() string {
 }
 
 // creates the correct response message as a byte slice, for the parent message
-func (m Message) CreateResponse(span opentracing.Span, status proto.GatewayOperation_GatewayResult) []byte {
+func (m Message) CreateResponse(span opentracing.Span, status pb.GatewayOperation_GatewayResult) []byte {
 	if span == nil {
 		span = opentracing.StartSpan("comfoconnect.Message.CreateResponse")
 	} else {
@@ -219,7 +222,7 @@ func (m Message) CreateResponse(span opentracing.Span, status proto.GatewayOpera
 	log.Debugf("creating response for operation type: %s", reflect.TypeOf(m.OperationType).Elem().Name())
 	responseType := getResponseTypeForOperationType(message.OperationType)
 	span.SetTag("responseType", responseType.String())
-	operation := proto.GatewayOperation{
+	operation := pb.GatewayOperation{
 		Type:      &responseType,
 		Reference: message.Operation.Reference,
 		Result:    &status,
@@ -240,50 +243,50 @@ func (m Message) CreateResponse(span opentracing.Span, status proto.GatewayOpera
 	switch responseType.String() {
 	case "CnTimeConfirmType":
 		currentTime := uint32(time.Now().Sub(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)).Seconds())
-		responseStruct.(*proto.CnTimeConfirm).CurrentTime = &currentTime
+		responseStruct.(*pb.CnTimeConfirm).CurrentTime = &currentTime
 	case "StartSessionConfirmType":
-		ok := proto.GatewayOperation_OK
+		ok := pb.GatewayOperation_OK
 		operation.Result = &ok
 	case "VersionConfirmType": // FIXME: get this from comfoconnect
 		gw := uint32(1049610)
 		cn := uint32(1073750016)
 		serial := "DEM0116371204"
-		responseStruct.(*proto.VersionConfirm).GatewayVersion = &gw
-		responseStruct.(*proto.VersionConfirm).ComfoNetVersion = &cn
-		responseStruct.(*proto.VersionConfirm).SerialNumber = &serial
-		ok := proto.GatewayOperation_OK
+		responseStruct.(*pb.VersionConfirm).GatewayVersion = &gw
+		responseStruct.(*pb.VersionConfirm).ComfoNetVersion = &cn
+		responseStruct.(*pb.VersionConfirm).SerialNumber = &serial
+		ok := pb.GatewayOperation_OK
 		operation.Result = &ok
 	case "GetRemoteAccessIdConfirmType": // FIXME: get this from comfoconnect
 		uuid := "7m\351\332}\322C\346\270\336^G\307\223Y\\"
-		responseStruct.(*proto.GetRemoteAccessIdConfirm).Uuid = []byte(uuid)
+		responseStruct.(*pb.GetRemoteAccessIdConfirm).Uuid = []byte(uuid)
 	case "CnRmiResponseType":
-		request := m.OperationType.(*proto.CnRmiRequest).Message
+		request := m.OperationType.(*pb.CnRmiRequest).Message
 		log.Debugf("Responding to CnRmiRequest(%x)", request)
 		// first request TODO: replace with actual call to comfoconnect
 		if bytes.Compare(request, []byte{0x02, 0x01, 0x01, 0x01, 0x15, 0x03, 0x04, 0x06, 0x05, 0x07}) == 0 {
 			responseData := []byte{0x02, 0x42, 0x45, 0x41, 0x30, 0x30, 0x34, 0x31, 0x38, 0x35, 0x30, 0x33, 0x31, 0x39, 0x31, 0x30, 0x00, 0x00, 0x10, 0x10, 0xc0, 0x02, 0x00, 0x54, 0x10, 0x40}
-			responseStruct.(*proto.CnRmiResponse).Message = responseData
+			responseStruct.(*pb.CnRmiResponse).Message = responseData
 		}
 
 		// second request TODO: replace with actual call to comfoconnect
 		if bytes.Compare(request, []byte{0x87, 0x15, 0x01}) == 0 {
 			responseData := []byte{0x0b, 0x01, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20, 0x1c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20, 0x1c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x58, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x58, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x58, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0xb0, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
-			responseStruct.(*proto.CnRmiResponse).Message = responseData
+			responseStruct.(*pb.CnRmiResponse).Message = responseData
 		}
 
 		// second request TODO: replace with actual call to comfoconnect
 		if bytes.Compare(request, []byte{0x87, 0x15, 0x05}) == 0 {
 			responseData := []byte{0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}
-			responseStruct.(*proto.CnRmiResponse).Message = responseData
+			responseStruct.(*pb.CnRmiResponse).Message = responseData
 		}
 
 	}
-	result := message.packMessage(operation, responseStruct)
+	result := message.packMessage(&operation, responseStruct)
 	span.SetTag("result", result)
 	return result
 }
 
-func (m Message) CreateCustomResponse(span opentracing.Span, operationType proto.GatewayOperation_OperationType, operationTypeStruct OperationType) []byte {
+func (m Message) CreateCustomResponse(span opentracing.Span, operationType pb.GatewayOperation_OperationType, operationTypeStruct OperationType) []byte {
 	if span == nil {
 		span = opentracing.StartSpan("comfoconnect.Message.CreateCustomResponse")
 	} else {
@@ -300,26 +303,28 @@ func (m Message) CreateCustomResponse(span opentracing.Span, operationType proto
 	})
 
 	log.Debugf("creating custom response for operation type: %s", reflect.TypeOf(operationTypeStruct).Elem().Name())
-	operation := proto.GatewayOperation{
+	operation := pb.GatewayOperation{
 		Type:      &operationType,
 		Reference: m.Operation.Reference, // if we add this, we get double reference (prefixed)??
 		Result:    nil,
 	}
 
-	return m.packMessage(operation, operationTypeStruct)
+	return m.packMessage(&operation, operationTypeStruct)
 }
 
 // setup a binary message ready to send
-func (m Message) packMessage(operation proto.GatewayOperation, operationType OperationType) []byte {
+func (m Message) packMessage(operation *pb.GatewayOperation, operationType OperationType) []byte {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
 		"object": "Message",
 		"method": "packMessage",
 	})
 
-	operationBytes, _ := operation.XXX_Marshal(nil, false)
+	operationBytes, _ := proto.Marshal(operation)
+	//operationBytes, _ := operation.XXX_Marshal(nil, false)
 	log.Trace("operationBytes: %x", operationBytes)
-	operationTypeBytes, _ := operationType.XXX_Marshal(nil, false)
+	operationTypeBytes, _ := proto.Marshal(operationType)
+	//operationTypeBytes, _ := operationType.XXX_Marshal(nil, false)
 	log.Trace("operationTypeBytes: %x", operationTypeBytes)
 	response := make([]byte, 4)
 	binary.BigEndian.PutUint32(response, uint32(len(operationTypeBytes)+34+len(operationBytes))) // raw message length
@@ -344,8 +349,8 @@ func (m Message) DecodePDO() RpdoTypeConverter {
 	if m.Operation.Type.String() != "CnRpdoNotificationType" {
 		return nil
 	}
-	ppid := m.OperationType.(*proto.CnRpdoNotification).Pdid
-	data := m.OperationType.(*proto.CnRpdoNotification).Data
+	ppid := m.OperationType.(*pb.CnRpdoNotification).Pdid
+	data := m.OperationType.(*pb.CnRpdoNotification).Data
 	return NewPpid(*ppid, data)
 }
 
@@ -355,21 +360,23 @@ func CreateSearchGatewayResponse(ipAddress string, uuid []byte) []byte {
 	//uuid := []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x25, 0x10, 0x10, 0x80, 0x01} // uuid header
 	//uuid = append(uuid, macAddress...)
 
-	resp := proto.SearchGatewayResponse{
+	resp := pb.SearchGatewayResponse{
 		Ipaddress:            &ipAddress,
 		Uuid:                 uuid,
 		Version:              &version,
-		XXX_NoUnkeyedLiteral: struct{}{},
-		XXX_unrecognized:     nil,
-		XXX_sizecache:        0,
+		//XXX_NoUnkeyedLiteral: struct{}{},
+		//XXX_unrecognized:     nil,
+		//XXX_sizecache:        0,
 	}
 
-	b, _ := resp.XXX_Marshal([]byte{0x12, 0x24}, false)
+	_ = proto.Unmarshal([]byte{0x12, 0x24}, &resp)
+	b, _ := proto.Marshal(&resp)
+	//b, _ := resp.XXX_Marshal([]byte{0x12, 0x24}, false)
 	return b
 }
 
 // takes the name for an operation type and finds the struct for it
-func GetStructForType(operationTypeString string) OperationType {
+func GetStructForType(operationTypeString string) proto.Message {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
 		"method": "GetStructForType",
@@ -378,133 +385,133 @@ func GetStructForType(operationTypeString string) OperationType {
 	var operationType OperationType
 	switch operationTypeString {
 	case "SetAddressRequestType":
-		operationType = &proto.SetAddressRequest{}
+		operationType = &pb.SetAddressRequest{}
 	case "RegisterAppRequestType":
-		operationType = &proto.RegisterAppRequest{}
+		operationType = &pb.RegisterAppRequest{}
 	case "StartSessionRequestType":
-		operationType = &proto.StartSessionRequest{}
+		operationType = &pb.StartSessionRequest{}
 	case "CloseSessionRequestType":
-		operationType = &proto.CloseSessionRequest{}
+		operationType = &pb.CloseSessionRequest{}
 	case "ListRegisteredAppsRequestType":
-		operationType = &proto.ListRegisteredAppsRequest{}
+		operationType = &pb.ListRegisteredAppsRequest{}
 	case "DeregisterAppRequestType":
-		operationType = &proto.DeregisterAppRequest{}
+		operationType = &pb.DeregisterAppRequest{}
 	case "ChangePinRequestType":
-		operationType = &proto.ChangePinRequest{}
+		operationType = &pb.ChangePinRequest{}
 	case "GetRemoteAccessIdRequestType":
-		operationType = &proto.GetRemoteAccessIdRequest{}
+		operationType = &pb.GetRemoteAccessIdRequest{}
 	case "SetRemoteAccessIdRequestType":
-		operationType = &proto.SetRemoteAccessIdRequest{}
+		operationType = &pb.SetRemoteAccessIdRequest{}
 	case "GetSupportIdRequestType":
-		operationType = &proto.GetSupportIdRequest{}
+		operationType = &pb.GetSupportIdRequest{}
 	case "SetSupportIdRequestType":
-		operationType = &proto.SetSupportIdRequest{}
+		operationType = &pb.SetSupportIdRequest{}
 	case "GetWebIdRequestType":
-		operationType = &proto.GetWebIdRequest{}
+		operationType = &pb.GetWebIdRequest{}
 	case "SetWebIdRequestType":
-		operationType = &proto.SetWebIdRequest{}
+		operationType = &pb.SetWebIdRequest{}
 	case "SetPushIdRequestType":
-		operationType = &proto.SetPushIdRequest{}
+		operationType = &pb.SetPushIdRequest{}
 	case "DebugRequestType":
-		operationType = &proto.DebugRequest{}
+		operationType = &pb.DebugRequest{}
 	case "UpgradeRequestType":
-		operationType = &proto.UpgradeRequest{}
+		operationType = &pb.UpgradeRequest{}
 	case "SetDeviceSettingsRequestType":
-		operationType = &proto.SetDeviceSettingsRequest{}
+		operationType = &pb.SetDeviceSettingsRequest{}
 	case "VersionRequestType":
-		operationType = &proto.VersionRequest{}
+		operationType = &pb.VersionRequest{}
 	case "SetAddressConfirmType":
-		operationType = &proto.SetAddressConfirm{}
+		operationType = &pb.SetAddressConfirm{}
 	case "RegisterAppConfirmType":
-		operationType = &proto.RegisterAppConfirm{}
+		operationType = &pb.RegisterAppConfirm{}
 	case "StartSessionConfirmType":
-		operationType = &proto.StartSessionConfirm{}
+		operationType = &pb.StartSessionConfirm{}
 	case "CloseSessionConfirmType":
-		operationType = &proto.CloseSessionConfirm{}
+		operationType = &pb.CloseSessionConfirm{}
 	case "ListRegisteredAppsConfirmType":
-		operationType = &proto.ListRegisteredAppsConfirm{}
+		operationType = &pb.ListRegisteredAppsConfirm{}
 	case "DeregisterAppConfirmType":
-		operationType = &proto.DeregisterAppConfirm{}
+		operationType = &pb.DeregisterAppConfirm{}
 	case "ChangePinConfirmType":
-		operationType = &proto.ChangePinConfirm{}
+		operationType = &pb.ChangePinConfirm{}
 	case "GetRemoteAccessIdConfirmType":
-		operationType = &proto.GetRemoteAccessIdConfirm{}
+		operationType = &pb.GetRemoteAccessIdConfirm{}
 	case "SetRemoteAccessIdConfirmType":
-		operationType = &proto.SetRemoteAccessIdConfirm{}
+		operationType = &pb.SetRemoteAccessIdConfirm{}
 	case "GetSupportIdConfirmType":
-		operationType = &proto.GetSupportIdConfirm{}
+		operationType = &pb.GetSupportIdConfirm{}
 	case "SetSupportIdConfirmType":
-		operationType = &proto.SetSupportIdConfirm{}
+		operationType = &pb.SetSupportIdConfirm{}
 	case "GetWebIdConfirmType":
-		operationType = &proto.GetWebIdConfirm{}
+		operationType = &pb.GetWebIdConfirm{}
 	case "SetWebIdConfirmType":
-		operationType = &proto.SetWebIdConfirm{}
+		operationType = &pb.SetWebIdConfirm{}
 	case "SetPushIdConfirmType":
-		operationType = &proto.SetPushIdConfirm{}
+		operationType = &pb.SetPushIdConfirm{}
 	case "DebugConfirmType":
-		operationType = &proto.DebugConfirm{}
+		operationType = &pb.DebugConfirm{}
 	case "UpgradeConfirmType":
-		operationType = &proto.UpgradeConfirm{}
+		operationType = &pb.UpgradeConfirm{}
 	case "SetDeviceSettingsConfirmType":
-		operationType = &proto.SetDeviceSettingsConfirm{}
+		operationType = &pb.SetDeviceSettingsConfirm{}
 	case "VersionConfirmType":
-		operationType = &proto.VersionConfirm{}
+		operationType = &pb.VersionConfirm{}
 	case "GatewayNotificationType":
-		operationType = &proto.GatewayNotification{}
+		operationType = &pb.GatewayNotification{}
 	case "KeepAliveType":
-		operationType = &proto.KeepAlive{}
+		operationType = &pb.KeepAlive{}
 	case "FactoryResetType":
-		operationType = &proto.FactoryReset{}
+		operationType = &pb.FactoryReset{}
 	case "CnTimeRequestType":
-		operationType = &proto.CnTimeRequest{}
+		operationType = &pb.CnTimeRequest{}
 	case "CnTimeConfirmType":
-		operationType = &proto.CnTimeConfirm{}
+		operationType = &pb.CnTimeConfirm{}
 	case "CnNodeRequestType":
-		operationType = &proto.CnNodeRequest{}
+		operationType = &pb.CnNodeRequest{}
 	case "CnNodeNotificationType":
-		operationType = &proto.CnNodeNotification{}
+		operationType = &pb.CnNodeNotification{}
 	case "CnRmiRequestType":
-		operationType = &proto.CnRmiRequest{}
+		operationType = &pb.CnRmiRequest{}
 	case "CnRmiResponseType":
-		operationType = &proto.CnRmiResponse{}
+		operationType = &pb.CnRmiResponse{}
 	case "CnRmiAsyncRequestType":
-		operationType = &proto.CnRmiAsyncRequest{}
+		operationType = &pb.CnRmiAsyncRequest{}
 	case "CnRmiAsyncConfirmType":
-		operationType = &proto.CnRmiAsyncConfirm{}
+		operationType = &pb.CnRmiAsyncConfirm{}
 	case "CnRmiAsyncResponseType":
-		operationType = &proto.CnRmiAsyncResponse{}
+		operationType = &pb.CnRmiAsyncResponse{}
 	case "CnRpdoRequestType":
-		operationType = &proto.CnRpdoRequest{}
+		operationType = &pb.CnRpdoRequest{}
 	case "CnRpdoConfirmType":
-		operationType = &proto.CnRpdoConfirm{}
+		operationType = &pb.CnRpdoConfirm{}
 	case "CnRpdoNotificationType":
-		operationType = &proto.CnRpdoNotification{}
+		operationType = &pb.CnRpdoNotification{}
 	case "CnAlarmNotificationType":
-		operationType = &proto.CnAlarmNotification{}
+		operationType = &pb.CnAlarmNotification{}
 	case "CnFupReadRegisterRequestType":
-		operationType = &proto.CnFupReadRegisterRequest{}
+		operationType = &pb.CnFupReadRegisterRequest{}
 	case "CnFupReadRegisterConfirmType":
-		operationType = &proto.CnFupReadRegisterConfirm{}
+		operationType = &pb.CnFupReadRegisterConfirm{}
 	case "CnFupProgramBeginRequestType":
-		operationType = &proto.CnFupProgramBeginRequest{}
+		operationType = &pb.CnFupProgramBeginRequest{}
 	case "CnFupProgramBeginConfirmType":
-		operationType = &proto.CnFupProgramBeginConfirm{}
+		operationType = &pb.CnFupProgramBeginConfirm{}
 	case "CnFupProgramRequestType":
-		operationType = &proto.CnFupProgramRequest{}
+		operationType = &pb.CnFupProgramRequest{}
 	case "CnFupProgramConfirmType":
-		operationType = &proto.CnFupProgramConfirm{}
+		operationType = &pb.CnFupProgramConfirm{}
 	case "CnFupProgramEndRequestType":
-		operationType = &proto.CnFupProgramEndRequest{}
+		operationType = &pb.CnFupProgramEndRequest{}
 	case "CnFupProgramEndConfirmType":
-		operationType = &proto.CnFupProgramEndConfirm{}
+		operationType = &pb.CnFupProgramEndConfirm{}
 	case "CnFupReadRequestType":
-		operationType = &proto.CnFupReadRequest{}
+		operationType = &pb.CnFupReadRequest{}
 	case "CnFupReadConfirmType":
-		operationType = &proto.CnFupReadConfirm{}
+		operationType = &pb.CnFupReadConfirm{}
 	case "CnFupResetRequestType":
-		operationType = &proto.CnFupResetRequest{}
+		operationType = &pb.CnFupResetRequest{}
 	case "CnFupResetConfirmType":
-		operationType = &proto.CnFupResetConfirm{}
+		operationType = &pb.CnFupResetConfirm{}
 	default:
 		operationType = nil
 	}
@@ -518,70 +525,70 @@ func GetStructForType(operationTypeString string) OperationType {
 }
 
 // takes an operation type and finds the correct response type
-func getResponseTypeForOperationType(operationType OperationType) proto.GatewayOperation_OperationType {
+func getResponseTypeForOperationType(operationType OperationType) pb.GatewayOperation_OperationType {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
 		"method": "getResponseTypeForOperationType",
 	})
 
-	var responseTypeString proto.GatewayOperation_OperationType
+	var responseTypeString pb.GatewayOperation_OperationType
 	operationTypeString := reflect.TypeOf(operationType).Elem().Name()
 
 	switch operationTypeString {
 	case "SetAddressRequest":
-		responseTypeString = proto.GatewayOperation_SetAddressConfirmType
+		responseTypeString = pb.GatewayOperation_SetAddressConfirmType
 	case "RegisterAppRequest":
-		responseTypeString = proto.GatewayOperation_RegisterAppConfirmType
+		responseTypeString = pb.GatewayOperation_RegisterAppConfirmType
 	case "StartSessionRequest":
-		responseTypeString = proto.GatewayOperation_StartSessionConfirmType
+		responseTypeString = pb.GatewayOperation_StartSessionConfirmType
 	case "CloseSessionRequest":
-		responseTypeString = proto.GatewayOperation_CloseSessionConfirmType
+		responseTypeString = pb.GatewayOperation_CloseSessionConfirmType
 	case "ListRegisteredAppsRequest":
-		responseTypeString = proto.GatewayOperation_ListRegisteredAppsConfirmType
+		responseTypeString = pb.GatewayOperation_ListRegisteredAppsConfirmType
 	case "DeregisterAppRequest":
-		responseTypeString = proto.GatewayOperation_SetAddressConfirmType
+		responseTypeString = pb.GatewayOperation_SetAddressConfirmType
 	case "ChangePinRequest":
-		responseTypeString = proto.GatewayOperation_ChangePinConfirmType
+		responseTypeString = pb.GatewayOperation_ChangePinConfirmType
 	case "GetRemoteAccessIdRequest":
-		responseTypeString = proto.GatewayOperation_GetRemoteAccessIdConfirmType
+		responseTypeString = pb.GatewayOperation_GetRemoteAccessIdConfirmType
 	case "SetRemoteAccessIdRequest":
-		responseTypeString = proto.GatewayOperation_SetRemoteAccessIdConfirmType
+		responseTypeString = pb.GatewayOperation_SetRemoteAccessIdConfirmType
 	case "GetSupportIdRequest":
-		responseTypeString = proto.GatewayOperation_GetSupportIdConfirmType
+		responseTypeString = pb.GatewayOperation_GetSupportIdConfirmType
 	case "GetWebIdRequest":
-		responseTypeString = proto.GatewayOperation_GetWebIdConfirmType
+		responseTypeString = pb.GatewayOperation_GetWebIdConfirmType
 	case "SetWebIdRequest":
-		responseTypeString = proto.GatewayOperation_SetWebIdConfirmType
+		responseTypeString = pb.GatewayOperation_SetWebIdConfirmType
 	case "SetPushIdRequest":
-		responseTypeString = proto.GatewayOperation_SetPushIdConfirmType
+		responseTypeString = pb.GatewayOperation_SetPushIdConfirmType
 	case "DebugRequest":
-		responseTypeString = proto.GatewayOperation_DebugConfirmType
+		responseTypeString = pb.GatewayOperation_DebugConfirmType
 	case "UpgradeRequest":
-		responseTypeString = proto.GatewayOperation_UpgradeConfirmType
+		responseTypeString = pb.GatewayOperation_UpgradeConfirmType
 	case "SetDeviceSettingsRequest":
-		responseTypeString = proto.GatewayOperation_SetDeviceSettingsConfirmType
+		responseTypeString = pb.GatewayOperation_SetDeviceSettingsConfirmType
 	case "VersionRequest":
-		responseTypeString = proto.GatewayOperation_VersionConfirmType
+		responseTypeString = pb.GatewayOperation_VersionConfirmType
 	case "CnTimeRequest":
-		responseTypeString = proto.GatewayOperation_CnTimeConfirmType
+		responseTypeString = pb.GatewayOperation_CnTimeConfirmType
 	case "CnRmiRequest":
-		responseTypeString = proto.GatewayOperation_CnRmiResponseType
+		responseTypeString = pb.GatewayOperation_CnRmiResponseType
 	case "CnRmiAsyncRequest":
-		responseTypeString = proto.GatewayOperation_CnRmiAsyncConfirmType
+		responseTypeString = pb.GatewayOperation_CnRmiAsyncConfirmType
 	case "CnRpdoRequest":
-		responseTypeString = proto.GatewayOperation_CnRpdoConfirmType
+		responseTypeString = pb.GatewayOperation_CnRpdoConfirmType
 	case "CnFupReadRegisterRequest":
-		responseTypeString = proto.GatewayOperation_CnFupReadRegisterConfirmType
+		responseTypeString = pb.GatewayOperation_CnFupReadRegisterConfirmType
 	case "CnFupProgramBeginRequest":
-		responseTypeString = proto.GatewayOperation_CnFupProgramBeginConfirmType
+		responseTypeString = pb.GatewayOperation_CnFupProgramBeginConfirmType
 	case "CnFupProgramRequest":
-		responseTypeString = proto.GatewayOperation_CnFupProgramConfirmType
+		responseTypeString = pb.GatewayOperation_CnFupProgramConfirmType
 	case "CnFupProgramEndRequest":
-		responseTypeString = proto.GatewayOperation_CnFupProgramEndConfirmType
+		responseTypeString = pb.GatewayOperation_CnFupProgramEndConfirmType
 	case "CnFupReadRequest":
-		responseTypeString = proto.GatewayOperation_CnFupReadConfirmType
+		responseTypeString = pb.GatewayOperation_CnFupReadConfirmType
 	case "CnFupResetRequest":
-		responseTypeString = proto.GatewayOperation_CnFupResetConfirmType
+		responseTypeString = pb.GatewayOperation_CnFupResetConfirmType
 	}
 
 	if responseTypeString == 0 {

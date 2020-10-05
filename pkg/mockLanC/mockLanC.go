@@ -12,7 +12,7 @@ import (
 	//"github.com/hsmade/comfoconnectbridge/proto"
 
 	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
-	"github.com/hsmade/comfoconnectbridge/proto"
+	"github.com/hsmade/comfoconnectbridge/pb"
 )
 
 type MockLanC struct {
@@ -115,29 +115,29 @@ func (m *MockLanC) handleClient(conn net.Conn) error {
 		//case "StartSessionRequestType":
 		//	m.respond(conn, message.CreateResponse(proto.GatewayOperation_OK))
 		case "StartSessionRequestType":
-			m.respond(conn, message.CreateResponse(nil, proto.GatewayOperation_OK))
+			m.respond(conn, message.CreateResponse(nil, pb.GatewayOperation_OK))
 
 			i := uint32(1)
-			mode := proto.CnNodeNotification_NODE_NORMAL
-			a := proto.CnNodeNotification{
+			mode := pb.CnNodeNotification_NODE_NORMAL
+			a := pb.CnNodeNotification{
 				NodeId:    &i,
 				ProductId: &i,
 				ZoneId:    &i,
 				Mode:      &mode,
 			}
 
-			m.respond(conn, message.CreateCustomResponse(nil, proto.GatewayOperation_CnNodeNotificationType, &a))
+			m.respond(conn, message.CreateCustomResponse(nil, pb.GatewayOperation_CnNodeNotificationType, &a))
 			i48 := uint32(48)
 			i5 := uint32(5)
 			i255 := uint32(255)
-			mode = proto.CnNodeNotification_NODE_NORMAL
-			a = proto.CnNodeNotification{
+			mode = pb.CnNodeNotification_NODE_NORMAL
+			a = pb.CnNodeNotification{
 				NodeId:    &i48,
 				ProductId: &i5,
 				ZoneId:    &i255,
 				Mode:      &mode,
 			}
-			m.respond(conn, message.CreateCustomResponse(nil, proto.GatewayOperation_CnNodeNotificationType, &a))
+			m.respond(conn, message.CreateCustomResponse(nil, pb.GatewayOperation_CnNodeNotificationType, &a))
 		default:
 			m.respond(conn, message.CreateResponse(nil, -1))
 		}

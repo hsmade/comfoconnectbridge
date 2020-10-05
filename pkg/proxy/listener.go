@@ -13,8 +13,8 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/uber/jaeger-client-go"
 
+	"github.com/hsmade/comfoconnectbridge/pb"
 	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
-	"github.com/hsmade/comfoconnectbridge/proto"
 )
 
 var (
@@ -221,28 +221,28 @@ func (a *App) handleMessage(message comfoconnect.Message, gateway chan comfoconn
 	case "RegisterAppRequestType":
 		log.Debug("responding to RegisterAppRequestType")
 		a.uuid = message.Src
-		_, err := a.conn.Write(message.CreateResponse(span, proto.GatewayOperation_OK))
+		_, err := a.conn.Write(message.CreateResponse(span, pb.GatewayOperation_OK))
 		if err != nil {
 			span.SetTag("err", err)
 			log.Warnf("failed to write response for RegisterAppRequestType: %v", err)
 		}
 	case "StartSessionRequestType":
 		log.Debug("responding to StartSessionRequestType")
-		_, err := a.conn.Write(message.CreateResponse(span, proto.GatewayOperation_OK))
+		_, err := a.conn.Write(message.CreateResponse(span, pb.GatewayOperation_OK))
 		if err != nil {
 			span.SetTag("err", err)
 			log.Warnf("failed to write response for StartSessionRequestType: %v", err)
 		}
 
 		i := uint32(1)
-		mode := proto.CnNodeNotification_NODE_NORMAL
-		notification := proto.CnNodeNotification{
+		mode := pb.CnNodeNotification_NODE_NORMAL
+		notification := pb.CnNodeNotification{
 			NodeId:    &i,
 			ProductId: &i,
 			ZoneId:    &i,
 			Mode:      &mode,
 		}
-		_, err = a.conn.Write(message.CreateCustomResponse(span, proto.GatewayOperation_CnNodeNotificationType, &notification))
+		_, err = a.conn.Write(message.CreateCustomResponse(span, pb.GatewayOperation_CnNodeNotificationType, &notification))
 		if err != nil {
 			span.SetTag("err", err)
 			log.Warnf("failed to write CnNodeNotification-1: %v", err)
@@ -251,14 +251,14 @@ func (a *App) handleMessage(message comfoconnect.Message, gateway chan comfoconn
 		i48 := uint32(48)
 		i5 := uint32(5)
 		i255 := uint32(255)
-		mode = proto.CnNodeNotification_NODE_NORMAL
-		notification = proto.CnNodeNotification{
+		mode = pb.CnNodeNotification_NODE_NORMAL
+		notification = pb.CnNodeNotification{
 			NodeId:    &i48,
 			ProductId: &i5,
 			ZoneId:    &i255,
 			Mode:      &mode,
 		}
-		_, err = a.conn.Write(message.CreateCustomResponse(span, proto.GatewayOperation_CnNodeNotificationType, &notification))
+		_, err = a.conn.Write(message.CreateCustomResponse(span, pb.GatewayOperation_CnNodeNotificationType, &notification))
 		if err != nil {
 			span.SetTag("err", err)
 			log.Warnf("failed to write CnNodeNotification-2: %v", err)

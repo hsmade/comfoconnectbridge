@@ -13,7 +13,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
-	"github.com/hsmade/comfoconnectbridge/proto"
+	"github.com/hsmade/comfoconnectbridge/pb"
 )
 
 var (
@@ -114,15 +114,15 @@ func (c *Client) register() error {
 	})
 
 	c.reference++
-	operationType := proto.GatewayOperation_RegisterAppRequestType
+	operationType := pb.GatewayOperation_RegisterAppRequestType
 	m := comfoconnect.Message{
 		Src: c.MyUUID,
 		Dst: c.GatewayUUID,
-		Operation: proto.GatewayOperation{
+		Operation: &pb.GatewayOperation{
 			Type:      &operationType,
 			Reference: &c.reference,
 		},
-		OperationType: &proto.RegisterAppRequest{
+		OperationType: &pb.RegisterAppRequest{
 			Uuid:       c.MyUUID,
 			Pin:        &c.Pin,
 			Devicename: &c.DeviceName,
@@ -162,15 +162,15 @@ func (c *Client) sessionRequest() error {
 
 	// send a start session request
 	c.reference++
-	operationType := proto.GatewayOperation_StartSessionRequestType
+	operationType := pb.GatewayOperation_StartSessionRequestType
 	_, err := c.conn.Write(comfoconnect.Message{
 		Src: c.MyUUID,
 		Dst: c.GatewayUUID,
-		Operation: proto.GatewayOperation{
+		Operation: &pb.GatewayOperation{
 			Type:      &operationType,
 			Reference: &c.reference,
 		},
-		OperationType: &proto.StartSessionRequest{},
+		OperationType: &pb.StartSessionRequest{},
 	}.Encode())
 	if err != nil {
 		log.Errorf("failed to send StartSessionRequest: %v", err)
@@ -206,15 +206,15 @@ func (c *Client) keepAlive(ctx context.Context) {
 			return
 		case <-ticker.C:
 			log.Debug("sending keep alive")
-			operationType := proto.GatewayOperation_CnTimeRequestType
+			operationType := pb.GatewayOperation_CnTimeRequestType
 			m := comfoconnect.Message{
 				Src: c.MyUUID,
 				Dst: c.GatewayUUID,
-				Operation: proto.GatewayOperation{
+				Operation: &pb.GatewayOperation{
 					Type:      &operationType,
 					Reference: &c.reference,
 				},
-				OperationType: &proto.CnTimeRequest{},
+				OperationType: &pb.CnTimeRequest{},
 			}
 			_, err := c.conn.Write(m.Encode())
 			if err != nil {
@@ -259,16 +259,16 @@ func (c *Client) subscribe(ppid uint32, pType uint32) error {
 		"type":   pType,
 	})
 
-	operationType := proto.GatewayOperation_CnRpdoRequestType
+	operationType := pb.GatewayOperation_CnRpdoRequestType
 	zone := uint32(1)
 	m := comfoconnect.Message{
 		Src: c.MyUUID,
 		Dst: c.GatewayUUID,
-		Operation: proto.GatewayOperation{
+		Operation: &pb.GatewayOperation{
 			Type:      &operationType,
 			Reference: &c.reference,
 		},
-		OperationType: &proto.CnRpdoRequest{
+		OperationType: &pb.CnRpdoRequest{
 			Pdid: &ppid,
 			Zone: &zone,
 			Type: &pType,

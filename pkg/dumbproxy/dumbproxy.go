@@ -15,7 +15,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
-	"github.com/hsmade/comfoconnectbridge/proto"
+	"github.com/hsmade/comfoconnectbridge/pb"
 )
 
 var (
@@ -55,7 +55,7 @@ func (d DumbProxy) Run(ctx context.Context, wg *sync.WaitGroup) {
 	for {
 		select {
 		case <-ctx.Done():
-			listener.Close()
+			_ = listener.Close()
 			wg.Done()
 		default:
 			err := listener.SetDeadline(time.Now().Add(time.Millisecond * 100))
@@ -147,7 +147,7 @@ func generateMetrics(message comfoconnect.Message) {
 
 	switch message.Operation.Type.String() {
 	case "CnRpdoRequestType":
-		b := message.OperationType.(*proto.CnRpdoRequest)
+		b := message.OperationType.(*pb.CnRpdoRequest)
 		log.Infof("CnRpdoRequestType: ppid:%d type:%d zone:%d", *b.Pdid, *b.Type, *b.Zone)
 	case "CnRpdoNotificationType":
 		conv := message.DecodePDO()

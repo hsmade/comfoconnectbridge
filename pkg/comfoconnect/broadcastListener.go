@@ -120,7 +120,7 @@ func (l *BroadcastListener) Stop() {
 	})
 
 	log.Debugf("Stopping")
-	l.listener.Close()
+	_ = l.listener.Close()
 	close(l.quit)
 	<-l.exited
 	log.Info("Stopped")

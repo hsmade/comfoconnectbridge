@@ -37,7 +37,7 @@ func main() {
 	l.Stop()
 
 	logrus.Info("waiting for ctrl-c")
-	for _ = range c {
+	for range c {
 		logrus.Info("closing down")
 		l.Stop()
 		b.Stop()

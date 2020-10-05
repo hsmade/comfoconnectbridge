@@ -1,5 +1,5 @@
 syntax = "proto2";
-option go_package = "github.com/hsmade/comfoconnectbridge/proto";
+option go_package = "github.com/hsmade/comfoconnectbridge/pb";
 message DiscoveryOperation {
  optional SearchGatewayRequest searchGatewayRequest = 1;
  optional SearchGatewayResponse searchGatewayResponse = 2;
