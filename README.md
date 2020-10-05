@@ -1,6 +1,9 @@
 # comfoconnectbridge
 Tries to be a transparent bridge for comfoconnect while gathering metrics and accepting commands over API
 
+## Proto file
+The proto file was copied from https://github.com/michaelarnauts/comfoconnect/blob/master/protobuf/zehnder.proto
+
 ## Current status
 The [client](cmd/client) and [dumbproxy](cmd/dumbproxy) work, but the actual [proxy](cmd/proxy) doesn't always work.
 * The client acts as a client, trying to fetch regular updates and exposing them through prometheus.
