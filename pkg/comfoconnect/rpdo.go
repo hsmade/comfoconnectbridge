@@ -163,7 +163,7 @@ func NewPpid(ppid uint32, data []byte) RpdoTypeConverter {
 	case 176:
 		return RpdoType1{rpdoType{ppid,"Unknown"}, data}
 	case 192:
-		return RpdoType2{rpdoType{ppid,"Days left before filters must be replaced"}, data}
+		return RpdoType1{rpdoType{ppid,"Days left before filters must be replaced"}, data}
 	case 208:
 		return RpdoType1{rpdoType{ppid,"Unknown temperature"}, data}
 	case 209:
