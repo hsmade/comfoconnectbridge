@@ -240,10 +240,12 @@ func (c *Client) subscribeAll() error {
 	})
 
 	for _, sensor := range c.Sensors {
+		log.Debugf("subscribing to ppid:%d and type:%d", sensor.Ppid, sensor.Type)
 		err := c.subscribe(sensor.Ppid, sensor.Type)
 		if err != nil {
-			log.Errorf("failed to subsribe to Sensor: %v: %v", sensor, err)
-			return err
+			log.Errorf("failed to subscribe to Sensor (ppid=%d, type=%d): %v", sensor.Ppid, sensor.Type, err)
+			//return err
+			continue
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
@@ -259,6 +261,7 @@ func (c *Client) subscribe(ppid uint32, pType uint32) error {
 		"type":   pType,
 	})
 
+	log.Debug("subscribing")
 	operationType := pb.GatewayOperation_CnRpdoRequestType
 	zone := uint32(1)
 	m := comfoconnect.Message{
@@ -288,7 +291,9 @@ func (c *Client) subscribe(ppid uint32, pType uint32) error {
 			log.Errorf("failed to receive CnRpdoConfirm: %v", err)
 			return errors.Wrap(err, "receiving CnRpdoConfirm")
 		}
+		log.Debugf("received: %v with err=%v" , m, err)
 		if m.Operation.Type.String() == "CnRpdoConfirmType" {
+			log.Debugf("subscription confirmed after %d times", i+1)
 			return nil
 		}
 	}
@@ -315,7 +320,7 @@ func (c *Client) receive() (comfoconnect.Message, error) {
 		}
 		log.Debugf("receive err: %v", err)
 	}
-	return message, nil
+	return message, err
 }
 
 func generateMetrics(message comfoconnect.Message) {

@@ -103,7 +103,7 @@ func (l *BroadcastListener) handleConnection(addr *net.UDPAddr) error {
 		"method": "handleConnection",
 	})
 
-	log.Debug("writing searchGatewayResponse")
+	log.Debugf("writing searchGatewayResponse: ip=%s uuid=%s", l.ResponseIP, l.myUUID)
 	_, err := l.listener.WriteToUDP(CreateSearchGatewayResponse(l.ResponseIP, l.myUUID), addr)
 	if err != nil {
 		log.Errorf("Failed to respond to SearchGatewayRequest: %v", err)

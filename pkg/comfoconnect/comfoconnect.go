@@ -17,6 +17,7 @@ import (
 )
 
 type OperationType proto.Message
+
 //type OperationType interface { // FIXME: rename
 //	proto.Message
 //	XXX_Unmarshal([]byte) error
@@ -32,6 +33,8 @@ type Message struct {
 	Span          opentracing.Span
 }
 
+// Decode packet from socket
+// https://github.com/michaelarnauts/comfoconnect/blob/master/PROTOCOL.md#manually-decoding-a-packet
 func GetMessageFromSocket(conn net.Conn) (Message, error) {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "comfoconnect",
@@ -41,6 +44,7 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 
 	var completeMessage []byte
 
+	// length of command + message
 	lengthBytes, err := ReadBytes(conn, 4)
 	if err != nil {
 		if opErr, ok := errors.Cause(err).(*net.OpError); ok && opErr.Timeout() {
@@ -66,8 +70,9 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 		span.SetTag("err", err)
 		return Message{}, err
 	}
-	log.Trace("length: %d", length)
+	log.Tracef("length: %d", length)
 
+	// source address
 	src, err := ReadBytes(conn, 16)
 	if err != nil {
 		err := errors.Wrap(err, "reading Src")
@@ -76,8 +81,9 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 		return Message{}, err
 	}
 	completeMessage = append(completeMessage, src...)
-	log.Trace("Src: %x", src)
+	log.Tracef("Src: %x", src)
 
+	// destination address
 	dst, err := ReadBytes(conn, 16)
 	if err != nil {
 		err := errors.Wrap(err, "reading Dst")
@@ -86,8 +92,9 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 		return Message{}, err
 	}
 	completeMessage = append(completeMessage, dst...)
-	log.Trace("Dst: %x", dst)
+	log.Tracef("Dst: %x", dst)
 
+	// length of operation command
 	operationLengthBytes, err := ReadBytes(conn, 2)
 	if err != nil {
 		err := errors.Wrap(err, "reading operation length")
@@ -104,8 +111,9 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 		span.SetTag("err", err)
 		return Message{}, err
 	}
-	log.Trace("operationLength: %d", operationLength)
+	log.Tracef("operationLength: %d", operationLength)
 
+	// operation command
 	operationBytes, err := ReadBytes(conn, int(operationLength))
 	if err != nil {
 		err := errors.Wrap(err, "reading operation")
@@ -114,23 +122,11 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 		return Message{}, err
 	}
 	completeMessage = append(completeMessage, operationBytes...)
-	log.Trace("operationBytes: %x", operationBytes)
+	log.Tracef("operationBytes: %x", operationBytes)
 
+	// length of the message
 	operationTypeLength := (length - 34) - uint32(operationLength)
 	var operationTypeBytes []byte
-
-	if operationTypeLength > 0 {
-		log.Trace("operationTypeLength: %d", operationTypeLength)
-		operationTypeBytes, err = ReadBytes(conn, int(operationTypeLength))
-		if err != nil {
-			err := errors.Wrap(err, "reading operation type")
-			log.Error(err)
-			span.SetTag("err", err)
-			return Message{}, err
-		}
-		completeMessage = append(completeMessage, operationTypeBytes...)
-		log.Trace("operationTypeBytes: %x", operationTypeBytes)
-	}
 
 	operation := pb.GatewayOperation{} // FIXME: parse instead of assume
 	err = proto.Unmarshal(operationBytes, &operation)
@@ -141,11 +137,29 @@ func GetMessageFromSocket(conn net.Conn) (Message, error) {
 		return Message{RawMessage: completeMessage}, err
 	}
 
+	// message (if any)
+	if operationTypeLength > 0 {
+		log.Tracef("operationTypeLength: %d", operationTypeLength)
+		operationTypeBytes, err = ReadBytes(conn, int(operationTypeLength))
+		if err != nil {
+			err := errors.Wrap(err, "reading operation type")
+			log.Error(err)
+			span.SetTag("err", err)
+			return Message{}, err
+		}
+		completeMessage = append(completeMessage, operationTypeBytes...)
+		log.Tracef("operationTypeBytes: %x", operationTypeBytes)
+	}
+
+	//echo 0810120101| xxd -r -p | protoc --decode=CnRpdoNotification pb/zehnder.proto
+	//pdid: 16
+	//data: "\001"
 	operationType := GetStructForType(operation.Type.String())
-	err = proto.Unmarshal(operationBytes, operationType)
+	err = proto.Unmarshal(operationTypeBytes, operationType)
 	if err != nil {
 		err := errors.Wrap(err, "failed to unmarshal operation type") // FIXME
 		log.Error(err)
+		log.Tracef("completeMessage: %x", completeMessage)
 		span.SetTag("err", err)
 		return Message{RawMessage: completeMessage}, err
 	}
@@ -322,18 +336,18 @@ func (m Message) packMessage(operation *pb.GatewayOperation, operationType Opera
 
 	operationBytes, _ := proto.Marshal(operation)
 	//operationBytes, _ := operation.XXX_Marshal(nil, false)
-	log.Trace("operationBytes: %x", operationBytes)
+	log.Tracef("operationBytes: %x", operationBytes)
 	operationTypeBytes, _ := proto.Marshal(operationType)
 	//operationTypeBytes, _ := operationType.XXX_Marshal(nil, false)
-	log.Trace("operationTypeBytes: %x", operationTypeBytes)
+	log.Tracef("operationTypeBytes: %x", operationTypeBytes)
 	response := make([]byte, 4)
 	binary.BigEndian.PutUint32(response, uint32(len(operationTypeBytes)+34+len(operationBytes))) // raw message length
-	log.Trace("length: %x", response)
+	log.Tracef("length: %x", response)
 	response = append(response, m.Src...)
 	response = append(response, m.Dst...)
 	b := make([]byte, 2)
 	binary.BigEndian.PutUint16(b, uint16(len(operationBytes))) // op length
-	log.Trace("op length: %x", b)
+	log.Tracef("op length: %x", b)
 	response = append(response, b...)
 	response = append(response, operationBytes...) // gatewayOperation
 	response = append(response, operationTypeBytes...)
@@ -360,16 +374,12 @@ func CreateSearchGatewayResponse(ipAddress string, uuid []byte) []byte {
 	//uuid := []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x25, 0x10, 0x10, 0x80, 0x01} // uuid header
 	//uuid = append(uuid, macAddress...)
 
-	resp := pb.SearchGatewayResponse{
-		Ipaddress:            &ipAddress,
-		Uuid:                 uuid,
-		Version:              &version,
-		//XXX_NoUnkeyedLiteral: struct{}{},
-		//XXX_unrecognized:     nil,
-		//XXX_sizecache:        0,
-	}
+	resp := pb.SearchGatewayResponse{}
 
 	_ = proto.Unmarshal([]byte{0x12, 0x24}, &resp)
+	resp.Ipaddress = &ipAddress
+	resp.Uuid = uuid
+	resp.Version = &version
 	b, _ := proto.Marshal(&resp)
 	//b, _ := resp.XXX_Marshal([]byte{0x12, 0x24}, false)
 	return b
@@ -628,7 +638,7 @@ func ReadBytes(conn net.Conn, size int) ([]byte, error) {
 		if readLen > 0 {
 			size -= readLen
 			result = append(result, buffer[:readLen]...)
-			log.Trace("read result now: %x, read bytes:%d", result, readLen)
+			log.Tracef("read result now: %x, read bytes:%d", result, readLen)
 		}
 
 		if size == 0 {
