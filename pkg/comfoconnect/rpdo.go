@@ -173,7 +173,7 @@ func NewPpid(ppid uint32, data []byte) RpdoTypeConverter {
 	case 211:
 		return RpdoType1{rpdoType{ppid, "Unknown"}, data}
 	case 212:
-		return RpdoType1{rpdoType{ppid, "Temperature profile: cool"}, data}
+		return RpdoType1{rpdoType{ppid, "Temperature profile target"}, data}
 	case 213:
 		return RpdoType1{rpdoType{ppid, "Avoided Heating: Avoided actual"}, data}
 	case 214:
