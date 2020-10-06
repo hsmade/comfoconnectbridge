@@ -202,6 +202,8 @@ func NewPpid(ppid uint32, data []byte) RpdoTypeConverter {
 		return RpdoType1{rpdoType{ppid, "Bypass state"}, data}
 	case 228:
 		return RpdoType1{rpdoType{ppid, "Unknown Frost Protection Unbalance"}, data}
+	case 230:
+		return RpdoType1{rpdoType{ppid, "Unknown"}, data}
 	case 274:
 		return RpdoType1{rpdoType{ppid, "Temperature: Extract Air"}, data}
 	case 275:
@@ -222,11 +224,17 @@ func NewPpid(ppid uint32, data []byte) RpdoTypeConverter {
 		return RpdoType1{rpdoType{ppid, "Unknown"}, data}
 	case 325:
 		return RpdoType1{rpdoType{ppid, "Unknown"}, data}
+	case 330:
+		return RpdoType1{rpdoType{ppid, "Unknown"}, data}
 	case 337:
 		return RpdoType1{rpdoType{ppid, "Unknown"}, data}
 	case 338:
 		return RpdoType1{rpdoType{ppid, "Unknown"}, data}
 	case 341:
+		return RpdoType1{rpdoType{ppid, "Unknown"}, data}
+	case 345:
+		return RpdoType1{rpdoType{ppid, "Unknown"}, data}
+	case 346:
 		return RpdoType1{rpdoType{ppid, "Unknown"}, data}
 	case 369:
 		return RpdoType1{rpdoType{ppid, "Unknown"}, data}
@@ -254,8 +262,12 @@ func NewPpid(ppid uint32, data []byte) RpdoTypeConverter {
 		return RpdoType1{rpdoType{ppid, "unknown GHE State"}, data}
 	case 419:
 		return RpdoType0{rpdoType{ppid, "unknown GHE Present"}, data}
+	case 784:
+		return RpdoType1{rpdoType{ppid, "Unknown"}, data}
 	case 785:
 		return RpdoType0{rpdoType{ppid, "ComfoCoolCompressor State"}, data}
+	case 802:
+		return RpdoType1{rpdoType{ppid, "Unknown"}, data}
 	default:
 		log.Errorf(fmt.Sprintf("unable to decode Rpdo with ppid: %d", ppid))
 		return RpdoType1{rpdoType{ppid, "unknown"}, data}
