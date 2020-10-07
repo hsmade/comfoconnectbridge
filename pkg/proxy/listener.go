@@ -284,7 +284,7 @@ func (a *App) Write(message comfoconnect.Message) error {
 	defer span.Finish()
 	e := message.Encode()
 	length, err := a.conn.Write(e)
-	log.Infof("Wrote %d bytes to app. err:%v bytes:%x message:%v", length, err, message.Encode(), message)
+	log.Infof("Wrote %d bytes to app. err:%v bytes:%x message:%v", length, err, e, message)
 	span.SetTag("length", length)
 	return err
 }

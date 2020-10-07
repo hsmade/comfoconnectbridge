@@ -76,7 +76,7 @@ func (d DumbProxy) Run(ctx context.Context, wg *sync.WaitGroup) {
 			gatewayConnection, err := net.Dial("tcp", fmt.Sprintf("%s:56747", d.GatewayIP))
 			if err != nil {
 				log.Errorf("connect to gw: %v", err)
-				return
+				panic(err) // no use to linger around if we can't connect
 			}
 			log.Debugf("connected to %s", gatewayConnection.RemoteAddr())
 
