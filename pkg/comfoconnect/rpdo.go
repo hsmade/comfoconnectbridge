@@ -92,6 +92,8 @@ func NewPpid(ppid uint32, data []byte) RpdoTypeConverter {
 	switch ppid {
 	case 16:
 		return RpdoType1{rpdoType{ppid, "Away indicator (`01` = low, medium, high fan speed, `07` = away)"}, data}
+	case 24:
+		return RpdoType1{rpdoType{ppid, "UnitStatus.PostHeaterTempBefore"}, data}
 	case 33:
 		return RpdoType1{rpdoType{ppid, "Unknown"}, data}
 	case 37:
@@ -165,13 +167,13 @@ func NewPpid(ppid uint32, data []byte) RpdoTypeConverter {
 	case 192:
 		return RpdoType1{rpdoType{ppid, "Days left before filters must be replaced"}, data}
 	case 208:
-		return RpdoType1{rpdoType{ppid, "Unknown temperature"}, data}
+		return RpdoType1{rpdoType{ppid, "Post heater/RMOT related temperature"}, data}
 	case 209:
 		return RpdoType1{rpdoType{ppid, "Current RMOT"}, data}
 	case 210:
-		return RpdoType1{rpdoType{ppid, "Unknown"}, data}
+		return RpdoType1{rpdoType{ppid, "SeasonDetectionHeatingActive"}, data}
 	case 211:
-		return RpdoType1{rpdoType{ppid, "Unknown"}, data}
+		return RpdoType1{rpdoType{ppid, "SeasonDetectionCoolingActive"}, data}
 	case 212:
 		return RpdoType1{rpdoType{ppid, "Temperature profile target"}, data}
 	case 213:
@@ -191,7 +193,7 @@ func NewPpid(ppid uint32, data []byte) RpdoTypeConverter {
 	case 220:
 		return RpdoType1{rpdoType{ppid, "Temperature: Outdoor Air"}, data}
 	case 221:
-		return RpdoType1{rpdoType{ppid, "Temperature: Supply Air"}, data}
+		return RpdoType1{rpdoType{ppid, "Temperature: Supply Air / PostHeaterTempAfter"}, data}
 	case 224:
 		return RpdoType1{rpdoType{ppid, "Unknown"}, data}
 	case 225:
@@ -201,7 +203,7 @@ func NewPpid(ppid uint32, data []byte) RpdoTypeConverter {
 	case 227:
 		return RpdoType1{rpdoType{ppid, "Bypass state"}, data}
 	case 228:
-		return RpdoType1{rpdoType{ppid, "Unknown Frost Protection Unbalance"}, data}
+		return RpdoType1{rpdoType{ppid, "Frost Protection Unbalance"}, data}
 	case 230:
 		return RpdoType1{rpdoType{ppid, "Unknown"}, data}
 	case 274:
@@ -237,13 +239,13 @@ func NewPpid(ppid uint32, data []byte) RpdoTypeConverter {
 	case 346:
 		return RpdoType1{rpdoType{ppid, "Unknown"}, data}
 	case 369:
-		return RpdoType1{rpdoType{ppid, "Unknown"}, data}
+		return RpdoType1{rpdoType{ppid, "AnalogInput.A1"}, data}
 	case 370:
-		return RpdoType1{rpdoType{ppid, "Unknown"}, data}
+		return RpdoType1{rpdoType{ppid, "AnalogInput.A2"}, data}
 	case 371:
-		return RpdoType1{rpdoType{ppid, "Unknown"}, data}
+		return RpdoType1{rpdoType{ppid, "AnalogInput.A3"}, data}
 	case 372:
-		return RpdoType1{rpdoType{ppid, "Unknown"}, data}
+		return RpdoType1{rpdoType{ppid, "AnalogInput.A4"}, data}
 	case 384:
 		return RpdoType1{rpdoType{ppid, "Unknown"}, data}
 	case 386:
@@ -253,11 +255,11 @@ func NewPpid(ppid uint32, data []byte) RpdoTypeConverter {
 	case 401:
 		return RpdoType1{rpdoType{ppid, "Unknown"}, data}
 	case 402:
-		return RpdoType0{rpdoType{ppid, "Unknown Post Heater Present"}, data}
+		return RpdoType0{rpdoType{ppid, "Post Heater Present"}, data}
 	case 416:
-		return RpdoType6{rpdoType{ppid, "unknown Outdoor air temperature"}, data}
+		return RpdoType6{rpdoType{ppid, "GHE Outdoor air temperature"}, data}
 	case 417:
-		return RpdoType6{rpdoType{ppid, "unknown GHE Ground temperature"}, data}
+		return RpdoType6{rpdoType{ppid, "GHE Ground temperature"}, data}
 	case 418:
 		return RpdoType1{rpdoType{ppid, "unknown GHE State"}, data}
 	case 419:
