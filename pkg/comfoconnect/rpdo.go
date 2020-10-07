@@ -195,7 +195,7 @@ func NewPpid(ppid uint32, data []byte) RpdoTypeConverter {
 	case 224:
 		return RpdoType1{rpdoType{ppid, "Unknown"}, data}
 	case 225:
-		return RpdoType1{rpdoType{ppid, "Unknown"}, data}
+		return RpdoType1{rpdoType{ppid, "Unknown: switches with fan"}, data}
 	case 226:
 		return RpdoType1{rpdoType{ppid, "Unknown"}, data}
 	case 227:
