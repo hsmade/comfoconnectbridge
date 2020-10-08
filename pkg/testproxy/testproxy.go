@@ -86,7 +86,7 @@ func (p *Proxy) copy(from, to net.Conn, wg *sync.WaitGroup) {
 	defer wg.Done()
 	for {
 
-		message, err := comfoconnect.GetMessageFromSocket(from)
+		message, err := comfoconnect.NewMessageFromSocket(from)
 		if err != nil {
 			if errors.Cause(err) == io.EOF {
 				return

@@ -48,7 +48,7 @@ var (
 )
 
 type Listener struct {
-	listener  *net.TCPListener
+	listener *net.TCPListener
 
 	apps      map[string]*App
 	toGateway chan comfoconnect.Message
@@ -159,11 +159,11 @@ func (a *App) HandleConnection(ctx context.Context, wg *sync.WaitGroup, gateway 
 	//	return float64(len(messageChannel))
 	//}))
 
-	go func (ctx context.Context, wg *sync.WaitGroup, messageChannel chan comfoconnect.Message) {
+	go func(ctx context.Context, wg *sync.WaitGroup, messageChannel chan comfoconnect.Message) {
 		log.Debug("starting socket reader")
 		for {
 			select {
-			case <- ctx.Done():
+			case <-ctx.Done():
 				log.Debug("closing connection reader go-func")
 				wg.Done()
 				return
@@ -173,7 +173,7 @@ func (a *App) HandleConnection(ctx context.Context, wg *sync.WaitGroup, gateway 
 					log.Warnf("failed to set readDeadline: %v", err)
 				}
 
-				message, err := comfoconnect.GetMessageFromSocket(a.conn)
+				message, err := comfoconnect.NewMessageFromSocket(a.conn)
 				if err != nil {
 					if errors.Cause(err) == io.EOF {
 						return
@@ -190,15 +190,15 @@ func (a *App) HandleConnection(ctx context.Context, wg *sync.WaitGroup, gateway 
 	log.Debug("starting main loop")
 	for {
 		select {
-		case <- ctx.Done():
+		case <-ctx.Done():
 			log.Debug("closing main loop")
 			wg.Done()
 			return nil
-		case message := <- messageChannel:
+		case message := <-messageChannel:
 			messageReceivedCount.WithLabelValues(message.Operation.Type.String()).Inc()
 			span := opentracing.GlobalTracer().StartSpan("proxy.App.HandleConnection.ReceivedMessage", opentracing.ChildOf(message.Span.Context()))
 			comfoconnect.SpanSetMessage(span, message)
-			log.WithField("span",span.Context().(jaeger.SpanContext).String()).Debugf("got a message from app(%s): %v", a.conn.RemoteAddr(), message)
+			log.WithField("span", span.Context().(jaeger.SpanContext).String()).Debugf("got a message from app(%s): %v", a.conn.RemoteAddr(), message)
 			a.uuid = message.Src
 			a.handleMessage(message, gateway)
 			span.Finish()
@@ -214,7 +214,7 @@ func (a *App) handleMessage(message comfoconnect.Message, gateway chan comfoconn
 		"module": "proxy",
 		"object": "listener",
 		"method": "handleMessage",
-		"span": span.Context().(jaeger.SpanContext).String(),
+		"span":   span.Context().(jaeger.SpanContext).String(),
 	})
 
 	switch message.Operation.Type.String() {

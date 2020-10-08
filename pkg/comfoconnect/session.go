@@ -59,7 +59,7 @@ func NewSession(ctx context.Context, wg *sync.WaitGroup, comfoConnectIP string, 
 	deviceName := "Proxy"
 	reference := uint32(1)
 	operationType := pb.GatewayOperation_RegisterAppRequestType
-	m := Message{
+	m := &Message{
 		Src: src,
 		Dst: dst,
 		Operation: &pb.GatewayOperation{
@@ -82,7 +82,7 @@ func NewSession(ctx context.Context, wg *sync.WaitGroup, comfoConnectIP string, 
 
 	// receive the confirmation for the registration
 	log.Debugf("receiving RegisterAppConfirm")
-	m, err = GetMessageFromSocket(conn)
+	m, err = NewMessageFromSocket(conn)
 	if err != nil {
 		log.Errorf("failed to receive RegisterAppConfirm: %v", err)
 		return nil, errors.Wrap(err, "receiving RegisterAppConfirm")
@@ -111,7 +111,7 @@ func NewSession(ctx context.Context, wg *sync.WaitGroup, comfoConnectIP string, 
 	}
 
 	// receive the confirmation for the session
-	m, err = GetMessageFromSocket(conn)
+	m, err = NewMessageFromSocket(conn)
 	if err != nil {
 		log.Errorf("failed to receive StartSessionConfirm: %v", err)
 		return nil, errors.Wrap(err, "receiving StartSessionConfirm")
@@ -243,9 +243,9 @@ func (s *Session) Close() {
 	}.Encode())
 }
 
-func (s *Session) Receive() (Message, error) {
+func (s *Session) Receive() (*Message, error) {
 	_ = s.Conn.SetReadDeadline(time.Now().Add(time.Millisecond * 300))
-	m, err := GetMessageFromSocket(s.Conn)
+	m, err := NewMessageFromSocket(s.Conn)
 	return m, err
 }
 

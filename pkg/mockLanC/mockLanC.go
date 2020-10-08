@@ -11,8 +11,8 @@ import (
 
 	//"github.com/hsmade/comfoconnectbridge/proto"
 
-	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
 	"github.com/hsmade/comfoconnectbridge/pb"
+	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
 )
 
 type MockLanC struct {
@@ -93,7 +93,7 @@ func (m *MockLanC) handleClient(conn net.Conn) error {
 	defer conn.Close()
 
 	for {
-		message, err := comfoconnect.GetMessageFromSocket(conn)
+		message, err := comfoconnect.NewMessageFromSocket(conn)
 		if err != nil {
 			if err, ok := errors.Cause(err).(net.Error); ok && err.Timeout() {
 				// this is a timeout, which just means there is no data (yet)

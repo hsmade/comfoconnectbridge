@@ -14,8 +14,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 
-	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
 	"github.com/hsmade/comfoconnectbridge/pb"
+	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
 )
 
 var (
@@ -104,11 +104,11 @@ func (d DumbProxy) proxyReceiveMessage(conn net.Conn, channel chan []byte) {
 			log.Warnf("failed to set readDeadline: %v", err)
 		}
 
-		message, err := comfoconnect.GetMessageFromSocket(conn)
+		message, err := comfoconnect.NewMessageFromSocket(conn)
 		if err == nil {
 			log.Infof("received %v from %s", message, conn.RemoteAddr().String())
 			if message.Operation.Type != nil {
-				generateMetrics(message)
+				generateMetrics(*message)
 				channel <- message.Encode()
 			}
 		} else {

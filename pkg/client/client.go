@@ -12,8 +12,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 
-	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
 	"github.com/hsmade/comfoconnectbridge/pb"
+	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
 )
 
 var (
@@ -115,7 +115,7 @@ func (c *Client) register() error {
 
 	c.reference++
 	operationType := pb.GatewayOperation_RegisterAppRequestType
-	m := comfoconnect.Message{
+	m := &comfoconnect.Message{
 		Src: c.MyUUID,
 		Dst: c.GatewayUUID,
 		Operation: &pb.GatewayOperation{
@@ -139,7 +139,7 @@ func (c *Client) register() error {
 
 	// receive the confirmation for the registration
 	log.Debugf("receiving RegisterAppConfirm")
-	m, err = comfoconnect.GetMessageFromSocket(c.conn)
+	m, err = comfoconnect.NewMessageFromSocket(c.conn)
 	if err != nil {
 		log.Errorf("failed to receive RegisterAppConfirm: %v", err)
 		return errors.Wrap(err, "receiving RegisterAppConfirm")
@@ -179,7 +179,7 @@ func (c *Client) sessionRequest() error {
 	c.reference++
 
 	// receive the confirmation for the session
-	m, err := comfoconnect.GetMessageFromSocket(c.conn)
+	m, err := comfoconnect.NewMessageFromSocket(c.conn)
 	if err != nil {
 		log.Errorf("failed to receive StartSessionConfirm: %v", err)
 		return errors.Wrap(err, "receiving StartSessionConfirm")
@@ -264,7 +264,7 @@ func (c *Client) subscribe(ppid uint32, pType uint32) error {
 	log.Debug("subscribing")
 	operationType := pb.GatewayOperation_CnRpdoRequestType
 	zone := uint32(1)
-	m := comfoconnect.Message{
+	m := &comfoconnect.Message{
 		Src: c.MyUUID,
 		Dst: c.GatewayUUID,
 		Operation: &pb.GatewayOperation{
@@ -291,7 +291,7 @@ func (c *Client) subscribe(ppid uint32, pType uint32) error {
 			log.Errorf("failed to receive CnRpdoConfirm: %v", err)
 			return errors.Wrap(err, "receiving CnRpdoConfirm")
 		}
-		log.Debugf("received: %v with err=%v" , m, err)
+		log.Debugf("received: %v with err=%v", m, err)
 		if m.Operation.Type.String() == "CnRpdoConfirmType" {
 			log.Debugf("subscription confirmed after %d times", i+1)
 			return nil
@@ -300,14 +300,14 @@ func (c *Client) subscribe(ppid uint32, pType uint32) error {
 	return errors.New("Failed to receive CnRpdoConfirm")
 }
 
-func (c *Client) receive() (comfoconnect.Message, error) {
+func (c *Client) receive() (*comfoconnect.Message, error) {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "client",
 		"object": "Client",
 		"method": "receive",
 	})
 
-	message, err := comfoconnect.GetMessageFromSocket(c.conn)
+	message, err := comfoconnect.NewMessageFromSocket(c.conn)
 	if err == nil {
 		log.Infof("received %v from %s", message, c.conn.RemoteAddr().String())
 		if message.Operation.Type != nil {
@@ -316,14 +316,14 @@ func (c *Client) receive() (comfoconnect.Message, error) {
 	} else {
 		if errors.Cause(err) == io.EOF {
 			log.Error("client left")
-			return comfoconnect.Message{}, err
+			return nil, err
 		}
 		log.Debugf("receive err: %v", err)
 	}
 	return message, err
 }
 
-func generateMetrics(message comfoconnect.Message) {
+func generateMetrics(message *comfoconnect.Message) {
 	log := logrus.WithFields(logrus.Fields{
 		"module": "proxy",
 		"method": "generateMetrics",
