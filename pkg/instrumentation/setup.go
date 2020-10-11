@@ -2,7 +2,6 @@ package instrumentation
 
 import (
 	"io"
-	"log"
 	"net/http"
 	"time"
 
@@ -12,6 +11,8 @@ import (
 	config "github.com/uber/jaeger-client-go/config"
 
 	"github.com/uber/jaeger-lib/metrics/prometheus"
+
+	"github.com/hsmade/comfoconnectbridge/pkg/helpers"
 )
 
 func EnableTracing(serviceName string, hostPort string) io.Closer {
@@ -32,7 +33,7 @@ func EnableTracing(serviceName string, hostPort string) io.Closer {
 		config.Metrics(prometheus.New()),
 	)
 	if err != nil {
-		log.Fatal(err)
+		helpers.StackLogger().Fatal(err)
 	}
 
 	opentracing.SetGlobalTracer(tracer)

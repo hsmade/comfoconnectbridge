@@ -8,13 +8,14 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
+	"github.com/hsmade/comfoconnectbridge/pkg/helpers"
+
 	//"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
 	"github.com/hsmade/comfoconnectbridge/pkg/mockLanC"
 )
 
 func main() {
-	logrus.SetLevel(logrus.DebugLevel)
-	//logrus.SetReportCaller(true)
+	logrus.SetLevel(logrus.TraceLevel)
 	customFormatter := new(logrus.TextFormatter)
 	customFormatter.TimestampFormat = time.StampMilli
 	logrus.SetFormatter(customFormatter)
@@ -36,9 +37,9 @@ func main() {
 	time.Sleep(10 * time.Second)
 	l.Stop()
 
-	logrus.Info("waiting for ctrl-c")
+	helpers.StackLogger().Info("waiting for ctrl-c")
 	for range c {
-		logrus.Info("closing down")
+		helpers.StackLogger().Info("closing down")
 		l.Stop()
 		b.Stop()
 		os.Exit(0)

@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/hsmade/comfoconnectbridge/pb"
+	"github.com/hsmade/comfoconnectbridge/pkg/helpers"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 )
 
 type OperationType proto.Message
@@ -30,12 +30,7 @@ type Message struct {
 // try to read a single message from a network socket
 func NewMessageFromSocket(conn net.Conn) (*Message, error) {
 	span := opentracing.StartSpan("comfoconnect.GetMessageFromSocket2")
-	log := logrus.WithFields(logrus.Fields{
-		"module": "comfoconnect",
-		"method": "NewMessageFromSocket",
-		//"span": span.Context().(jaeger.SpanContext).String(),
-	})
-	log.Debug("Reading message from socket")
+	helpers.StackLogger().Debug("Reading message from socket")
 
 	var err error
 	message := Message{
@@ -48,88 +43,68 @@ func NewMessageFromSocket(conn net.Conn) (*Message, error) {
 	var length uint32
 	err = binary.Read(conn, binary.BigEndian, &length)
 	if err != nil {
-		err := errors.Wrap(err, "reading message length from socket")
-		log.Error(err)
-		return nil, err
+		return nil, helpers.LogOnError(errors.Wrap(err, "reading message length from socket"))
 	}
 	if length > 1024 {
-		err := errors.New(fmt.Sprintf("Invalid length received for message: %d", length))
-		log.Error(err)
-		return nil, err
+		return nil, helpers.LogOnError(errors.New(fmt.Sprintf("Invalid length received for message: %d", length)))
 	}
-	log.Tracef("message length: %d", length)
+	helpers.StackLogger().Tracef("message length: %d", length)
 
 	message.Src, err = ReadBytes(conn, len(message.Src))
 	if err != nil {
-		err := errors.Wrap(err, "reading src address from socket")
-		log.Error(err)
-		return nil, err
+		return nil, helpers.LogOnError(errors.Wrap(err, "reading src address from socket"))
 	}
-	log.Tracef("src: %x", message.Src)
+	helpers.StackLogger().Tracef("src: %x", message.Src)
 
 	message.Dst, err = ReadBytes(conn, len(message.Dst))
 	if err != nil {
-		err := errors.Wrap(err, "reading dst address from socket")
-		log.Error(err)
-		return nil, err
+		return nil, helpers.LogOnError(errors.Wrap(err, "reading dst address from socket"))
 	}
-	log.Tracef("dst: %x", message.Dst)
+	helpers.StackLogger().Tracef("dst: %x", message.Dst)
 
 	var operationLength uint16
 	err = binary.Read(conn, binary.BigEndian, &operationLength)
 	if err != nil {
-		err := errors.Wrap(err, "reading operation length from socket")
-		log.Error(err)
-		return nil, err
+		return nil, helpers.LogOnError(errors.Wrap(err, "reading operation length from socket"))
 	}
 	if operationLength > 1024 {
-		err := errors.New(fmt.Sprintf("Invalid length received for operation: %d", operationLength))
-		log.Error(err)
-		return nil, err
+		return nil, helpers.LogOnError(errors.New(fmt.Sprintf("Invalid length received for operation: %d", operationLength)))
 	}
-	log.Tracef("operation length: %d", operationLength)
+	helpers.StackLogger().Tracef("operation length: %d", operationLength)
 
 	operationBytes := make([]byte, operationLength)
 	operationBytes, err = ReadBytes(conn, int(operationLength))
 	if err != nil {
-		err := errors.Wrap(err, "reading operation from socket")
-		log.Error(err)
-		return nil, err
+		return nil, helpers.LogOnError(errors.Wrap(err, "reading operation from socket"))
 	}
-	log.Tracef("operation bytes: %x", operationBytes)
+	helpers.StackLogger().Tracef("operation bytes: %x", operationBytes)
 
 	// There is only one operation, even in the android code
 	err = proto.Unmarshal(operationBytes, message.Operation)
 	if err != nil {
-		err := errors.Wrap(err, "parsing operation bytes into operation struct")
-		log.Error(err)
-		return nil, err
+		return nil, helpers.LogOnError(errors.Wrap(err, "parsing operation bytes into operation struct"))
 	}
-	log.Tracef("operation type: %s", message.Operation.Type.String())
+	helpers.StackLogger().Tracef("operation type: %s", message.Operation.Type.String())
 
 	operationTypeLength := (length - 34) - uint32(operationLength)
 	OperationTypeBytes := make([]byte, operationTypeLength)
-	log.Tracef("operation type length: %d", operationTypeLength)
+	helpers.StackLogger().Tracef("operation type length: %d", operationTypeLength)
 	if operationTypeLength > 0 {
 		OperationTypeBytes, err = ReadBytes(conn, int(operationTypeLength))
 		if err != nil {
-			err := errors.Wrap(err, "reading operation type from socket")
-			log.Error(err)
-			return nil, err
+			return nil, helpers.LogOnError(errors.Wrap(err, "reading operation type from socket"))
 		}
-		log.Tracef("operation type bytes: %x", OperationTypeBytes)
+		helpers.StackLogger().Tracef("operation type bytes: %x", OperationTypeBytes)
 	}
 
 	// assign operation type to empty struct of right type
 	message.OperationType = GetStructForType(message.Operation.Type.String())
 	err = proto.Unmarshal(OperationTypeBytes, message.OperationType)
 	if err != nil {
-		err := errors.Wrap(err, "parsing operation type bytes into operation struct")
-		log.Error(err)
-		return nil, err
+		return nil, helpers.LogOnError(errors.Wrap(err, "parsing operation type bytes into operation struct"))
 	}
 
-	log.Debugf("read message; %v", message)
+	helpers.StackLogger().Debugf("read message; %v", message)
 	span.SetTag("message", message)
 	return &message, nil
 }
@@ -159,17 +134,11 @@ func (m Message) CreateResponse(span opentracing.Span, status pb.GatewayOperatio
 	defer span.Finish()
 	span.SetTag("status", status)
 
-	log := logrus.WithFields(logrus.Fields{
-		"module": "comfoconnect",
-		"object": "Message",
-		"method": "CreateResponse",
-		//"span": span.Context().(jaeger.SpanContext).String(),
-	})
-
-	message := m
-	message.Src = m.Dst
-	message.Dst = m.Src
-	log.Debugf("creating response for operation type: %s", reflect.TypeOf(m.OperationType).Elem().Name())
+	helpers.StackLogger().Debugf("creating response for operation type: %s", reflect.TypeOf(m.OperationType).Elem().Name())
+	message := Message{
+		Src: m.Dst,
+		Dst: m.Src,
+	}
 	responseType := getResponseTypeForOperationType(message.OperationType)
 	span.SetTag("responseType", responseType.String())
 	operation := pb.GatewayOperation{
@@ -177,6 +146,8 @@ func (m Message) CreateResponse(span opentracing.Span, status pb.GatewayOperatio
 		Reference: message.Operation.Reference,
 		Result:    &status,
 	}
+	message.Operation = &operation
+
 	if status == -1 {
 		operation.Result = nil
 	}
@@ -184,12 +155,13 @@ func (m Message) CreateResponse(span opentracing.Span, status pb.GatewayOperatio
 	responseStruct := GetStructForType(responseType.String())
 	if responseStruct == nil {
 		err := errors.New(fmt.Sprintf("unable to find struct for type: %s", responseType.String()))
-		log.Error(err)
+		helpers.StackLogger().Error(err)
 		span.SetTag("err", err)
 		return nil
 	}
 
-	//overrides
+	// set the data for the operation type
+	// FIXME: use the builder pattern?
 	switch responseType.String() {
 	case "CnTimeConfirmType":
 		currentTime := uint32(time.Now().Sub(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)).Seconds())
@@ -211,7 +183,7 @@ func (m Message) CreateResponse(span opentracing.Span, status pb.GatewayOperatio
 		responseStruct.(*pb.GetRemoteAccessIdConfirm).Uuid = []byte(uuid)
 	case "CnRmiResponseType":
 		request := m.OperationType.(*pb.CnRmiRequest).Message
-		log.Debugf("Responding to CnRmiRequest(%x)", request)
+		helpers.StackLogger().Debugf("Responding to CnRmiRequest(%x)", request)
 		// first request TODO: replace with actual call to comfoconnect
 		if bytes.Compare(request, []byte{0x02, 0x01, 0x01, 0x01, 0x15, 0x03, 0x04, 0x06, 0x05, 0x07}) == 0 {
 			responseData := []byte{0x02, 0x42, 0x45, 0x41, 0x30, 0x30, 0x34, 0x31, 0x38, 0x35, 0x30, 0x33, 0x31, 0x39, 0x31, 0x30, 0x00, 0x00, 0x10, 0x10, 0xc0, 0x02, 0x00, 0x54, 0x10, 0x40}
@@ -245,14 +217,7 @@ func (m Message) CreateCustomResponse(span opentracing.Span, operationType pb.Ga
 	defer span.Finish()
 	span.SetTag("operationType", operationType.String())
 
-	log := logrus.WithFields(logrus.Fields{
-		"module": "comfoconnect",
-		"object": "Message",
-		"method": "CreateCustomResponse",
-		//"span": span.Context().(jaeger.SpanContext).String(),
-	})
-
-	log.Debugf("creating custom response for operation type: %s", reflect.TypeOf(operationTypeStruct).Elem().Name())
+	helpers.StackLogger().Debugf("creating custom response for operation type: %s", reflect.TypeOf(operationTypeStruct).Elem().Name())
 	operation := pb.GatewayOperation{
 		Type:      &operationType,
 		Reference: m.Operation.Reference, // if we add this, we get double reference (prefixed)??
@@ -264,24 +229,18 @@ func (m Message) CreateCustomResponse(span opentracing.Span, operationType pb.Ga
 
 // setup a binary message ready to send
 func (m Message) packMessage(operation *pb.GatewayOperation, operationType OperationType) []byte {
-	log := logrus.WithFields(logrus.Fields{
-		"module": "comfoconnect",
-		"object": "Message",
-		"method": "packMessage",
-	})
-
 	operationBytes, _ := proto.Marshal(operation)
-	log.Tracef("operationBytes: %x", operationBytes)
+	helpers.StackLogger().Tracef("operationBytes: %x", operationBytes)
 	operationTypeBytes, _ := proto.Marshal(operationType)
-	log.Tracef("operationTypeBytes: %x", operationTypeBytes)
+	helpers.StackLogger().Tracef("operationTypeBytes: %x", operationTypeBytes)
 	response := make([]byte, 4)
 	binary.BigEndian.PutUint32(response, uint32(len(operationTypeBytes)+34+len(operationBytes))) // raw message length
-	log.Tracef("length: %x", response)
+	helpers.StackLogger().Tracef("length: %x", response)
 	response = append(response, m.Src...)
 	response = append(response, m.Dst...)
 	b := make([]byte, 2)
 	binary.BigEndian.PutUint16(b, uint16(len(operationBytes))) // op length
-	log.Tracef("op length: %x", b)
+	helpers.StackLogger().Tracef("op length: %x", b)
 	response = append(response, b...)
 	response = append(response, operationBytes...) // gatewayOperation
 	response = append(response, operationTypeBytes...)

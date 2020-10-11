@@ -9,9 +9,9 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 
 	"github.com/hsmade/comfoconnectbridge/pb"
+	"github.com/hsmade/comfoconnectbridge/pkg/helpers"
 )
 
 // take an IP address, and a MAC address to respond with and create search gateway response
@@ -33,11 +33,6 @@ func CreateSearchGatewayResponse(ipAddress string, uuid []byte) []byte {
 
 // takes the name for an operation type and finds the struct for it
 func GetStructForType(operationTypeString string) proto.Message {
-	log := logrus.WithFields(logrus.Fields{
-		"module": "comfoconnect",
-		"method": "GetStructForType",
-	})
-
 	var operationType OperationType
 	switch operationTypeString {
 	case "SetAddressRequestType":
@@ -173,20 +168,15 @@ func GetStructForType(operationTypeString string) proto.Message {
 	}
 
 	if operationType == nil {
-		log.Errorf("unable to find matching struct for operation type: %s", operationTypeString)
+		helpers.StackLogger().Errorf("unable to find matching struct for operation type: %s", operationTypeString)
 	} else {
-		log.Debugf("found struct: %s, for operation type:%s", reflect.TypeOf(operationType).Elem().Name(), operationTypeString)
+		helpers.StackLogger().Debugf("found struct: %s, for operation type:%s", reflect.TypeOf(operationType).Elem().Name(), operationTypeString)
 	}
 	return operationType
 }
 
 // takes an operation type and finds the correct type to respond with
 func getResponseTypeForOperationType(operationType OperationType) pb.GatewayOperation_OperationType {
-	log := logrus.WithFields(logrus.Fields{
-		"module": "comfoconnect",
-		"method": "getResponseTypeForOperationType",
-	})
-
 	var responseTypeString pb.GatewayOperation_OperationType
 	operationTypeString := reflect.TypeOf(operationType).Elem().Name()
 
@@ -248,79 +238,38 @@ func getResponseTypeForOperationType(operationType OperationType) pb.GatewayOper
 	}
 
 	if responseTypeString == 0 {
-		log.Errorf("unable to find response type for operation type: %s", operationTypeString)
+		helpers.StackLogger().Errorf("unable to find response type for operation type: %s", operationTypeString)
 	} else {
-		log.Debugf("found response type: %s for operation type: %s", responseTypeString, operationTypeString)
+		helpers.StackLogger().Debugf("found response type: %s for operation type: %s", responseTypeString, operationTypeString)
 	}
 	return responseTypeString
 }
 
-//func ReadFromSocket(conn net.Conn, data *[]byte, size int) error {
-//	log := logrus.WithFields(logrus.Fields{
-//		"module": "comfoconnect",
-//		"method": "ReadFromSocket",
-//		"size":   size,
-//	})
-//	log.Debugf("reading from %s", conn.RemoteAddr().String())
-//	result := *data
-//
-//	for {
-//		buffer := make([]byte, size)
-//		readLen, err := conn.Read(buffer)
-//		if err != nil {
-//			return errors.Wrap(err, "reading from socket")
-//		}
-//
-//		if readLen > 0 {
-//			size -= readLen
-//			result = append(result, buffer[:readLen]...)
-//			log.Tracef("read result now: %x, read bytes:%d", result, readLen)
-//		}
-//
-//		if size == 0 {
-//			break
-//		}
-//
-//		if size < 0 {
-//			return errors.New("read too many bytes: size")
-//		}
-//	}
-//
-//	return nil
-//}
-
 // Read `size` bytes from a socket
 // Will loop conn.Read() until it has enough bytes
 func ReadBytes(conn net.Conn, size int) ([]byte, error) {
-	log := logrus.WithFields(logrus.Fields{
-		"module": "comfoconnect",
-		"method": "ReadBytes",
-		"size":   size,
-	})
-	log.Debugf("reading from %s", conn.RemoteAddr().String())
+	helpers.StackLogger().Debugf("reading from:%s with size:%d", conn.RemoteAddr().String(), size)
 
 	if size < 1 {
-		err := errors.New(fmt.Sprintf("Invalid size: %d", size))
-		log.Error(err)
-		return nil, err
+		return nil, helpers.LogOnError(errors.New(fmt.Sprintf("Invalid size: %d", size)))
 	}
 	var result []byte
 	for {
 		err := conn.SetReadDeadline(time.Now().Add(time.Second * 5))
 		if err != nil {
-			return nil, errors.Wrap(err, "setting timeout for read")
+			return nil, helpers.LogOnError(errors.Wrap(err, "setting timeout for read"))
 		}
 
 		buffer := make([]byte, size)
 		readLen, err := conn.Read(buffer)
 		if err != nil {
-			return result, errors.Wrap(err, "reading from socket")
+			return result, helpers.LogOnError(errors.Wrap(err, "reading from socket"))
 		}
 
 		if readLen > 0 {
 			size -= readLen
 			result = append(result, buffer[:readLen]...)
-			log.Tracef("read result now: %x, read bytes:%d", result, readLen)
+			helpers.StackLogger().Tracef("read result now: %x, read bytes:%d", result, readLen)
 		}
 
 		if size == 0 {

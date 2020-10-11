@@ -10,12 +10,13 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
+	"github.com/hsmade/comfoconnectbridge/pkg/helpers"
 	"github.com/hsmade/comfoconnectbridge/pkg/instrumentation"
 	"github.com/hsmade/comfoconnectbridge/pkg/proxy"
 )
 
 func main() {
-	logrus.SetLevel(logrus.DebugLevel)
+	logrus.SetLevel(logrus.TraceLevel)
 	customFormatter := new(logrus.TextFormatter)
 	customFormatter.TimestampFormat = time.StampMilli
 	logrus.SetFormatter(customFormatter)
@@ -38,9 +39,9 @@ func main() {
 	p := proxy.NewProxy("192.168.0.19", []byte{0xb8, 0x27, 0xeb, 0xf9, 0xf9, 0x12})
 	go p.Run(ctx, wg)
 
-	logrus.Info("waiting for ctrl-c")
+	helpers.StackLogger().Info("waiting for ctrl-c")
 	for range c {
-		logrus.Info("closing down")
+		helpers.StackLogger().Info("closing down")
 		l.Stop()
 		cancel()
 		wg.Wait()

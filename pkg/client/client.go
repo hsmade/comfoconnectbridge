@@ -10,10 +10,10 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/sirupsen/logrus"
 
 	"github.com/hsmade/comfoconnectbridge/pb"
 	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
+	"github.com/hsmade/comfoconnectbridge/pkg/helpers"
 )
 
 var (
@@ -56,31 +56,25 @@ func (c Client) Run(ctx context.Context) {
 }
 
 func (c *Client) startSession(ctx context.Context) {
-	log := logrus.WithFields(logrus.Fields{
-		"module": "client",
-		"object": "Client",
-		"method": "startSession",
-	})
-
 	connection, err := net.Dial("tcp", fmt.Sprintf("%s:56747", c.GatewayIP))
 	if err != nil {
-		log.Errorf("connect to gw: %v", err)
+		helpers.StackLogger().Errorf("connect to gw: %v", err)
 		//os.Exit(-1)
 		time.Sleep(5 * time.Second)
 		return
 	}
-	log.Infof("connected to %s", connection.RemoteAddr())
+	helpers.StackLogger().Infof("connected to %s", connection.RemoteAddr())
 	c.conn = connection
 
 	err = c.register()
 	if err != nil {
-		log.Errorf("registering with gw: %v", err)
+		helpers.StackLogger().Errorf("registering with gw: %v", err)
 		return
 	}
 
 	err = c.sessionRequest()
 	if err != nil {
-		log.Errorf("session request with gw: %v", err)
+		helpers.StackLogger().Errorf("session request with gw: %v", err)
 		return
 	}
 
@@ -88,7 +82,7 @@ func (c *Client) startSession(ctx context.Context) {
 
 	err = c.subscribeAll()
 	if err != nil {
-		log.Errorf("subscribeAll with gw: %v", err)
+		helpers.StackLogger().Errorf("subscribeAll with gw: %v", err)
 		return
 	}
 
@@ -99,7 +93,7 @@ func (c *Client) startSession(ctx context.Context) {
 		default:
 			_, err := c.receive()
 			if err != nil {
-				log.Errorf("receive from gw: %v", err)
+				helpers.StackLogger().Errorf("receive from gw: %v", err)
 				return
 			}
 		}
@@ -107,12 +101,6 @@ func (c *Client) startSession(ctx context.Context) {
 }
 
 func (c *Client) register() error {
-	log := logrus.WithFields(logrus.Fields{
-		"module": "client",
-		"object": "Client",
-		"method": "register",
-	})
-
 	c.reference++
 	operationType := pb.GatewayOperation_RegisterAppRequestType
 	m := &comfoconnect.Message{
@@ -129,37 +117,28 @@ func (c *Client) register() error {
 		},
 	}
 
-	log.Debugf("Writing RegisterAppRequest: %x", m.Encode())
+	helpers.StackLogger().Debugf("Writing RegisterAppRequest: %x", m.Encode())
 	_, err := c.conn.Write(m.Encode())
 	if err != nil {
-		log.Errorf("failed to send RegisterAppRequest: %v", err)
-		return errors.Wrap(err, "sending RegisterAppRequest")
+		return helpers.LogOnError(errors.Wrap(err, "sending RegisterAppRequest"))
 	}
 	c.reference++
 
 	// receive the confirmation for the registration
-	log.Debugf("receiving RegisterAppConfirm")
+	helpers.StackLogger().Debugf("receiving RegisterAppConfirm")
 	m, err = comfoconnect.NewMessageFromSocket(c.conn)
 	if err != nil {
-		log.Errorf("failed to receive RegisterAppConfirm: %v", err)
-		return errors.Wrap(err, "receiving RegisterAppConfirm")
+		return helpers.LogOnError(errors.Wrap(err, "receiving RegisterAppConfirm"))
 	}
 	if m.Operation.Type.String() != "RegisterAppConfirmType" {
-		log.Errorf("invalid message type, expected RegisterAppConfirm but got: %v", m.String())
-		return errors.New(fmt.Sprintf("received invalid message type instead of RegisterAppConfirmType: %v", m.String()))
+		return helpers.LogOnError(errors.New(fmt.Sprintf("received invalid message type instead of RegisterAppConfirmType: %v", m.String())))
 	}
-	log.Debugf("received RegisterAppConfirm: %x", m.Encode())
+	helpers.StackLogger().Debugf("received RegisterAppConfirm: %x", m.Encode())
 
 	return nil
 }
 
 func (c *Client) sessionRequest() error {
-	log := logrus.WithFields(logrus.Fields{
-		"module": "client",
-		"object": "Client",
-		"method": "register",
-	})
-
 	// send a start session request
 	c.reference++
 	operationType := pb.GatewayOperation_StartSessionRequestType
@@ -173,39 +152,30 @@ func (c *Client) sessionRequest() error {
 		OperationType: &pb.StartSessionRequest{},
 	}.Encode())
 	if err != nil {
-		log.Errorf("failed to send StartSessionRequest: %v", err)
-		return errors.Wrap(err, "sending StartSessionRequest")
+		return helpers.LogOnError(errors.Wrap(err, "sending StartSessionRequest"))
 	}
 	c.reference++
 
 	// receive the confirmation for the session
 	m, err := comfoconnect.NewMessageFromSocket(c.conn)
 	if err != nil {
-		log.Errorf("failed to receive StartSessionConfirm: %v", err)
-		return errors.Wrap(err, "receiving StartSessionConfirm")
+		return helpers.LogOnError(errors.Wrap(err, "receiving StartSessionConfirm"))
 	}
 	if m.Operation.Type.String() != "StartSessionConfirmType" {
-		log.Errorf("invalid message type, expected StartSessionConfirm but got: %v", m.String())
-		return errors.New(fmt.Sprintf("received invalid message type instead of StartSessionConfirmType: %v", m.String()))
+		return helpers.LogOnError(errors.New(fmt.Sprintf("received invalid message type instead of StartSessionConfirmType: %v", m.String())))
 	}
 
 	return nil
 }
 
 func (c *Client) keepAlive(ctx context.Context) {
-	log := logrus.WithFields(logrus.Fields{
-		"module": "client",
-		"object": "Client",
-		"method": "keepAlive",
-	})
-
 	ticker := time.NewTicker(5 * time.Second)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			log.Debug("sending keep alive")
+			helpers.StackLogger().Debug("sending keep alive")
 			operationType := pb.GatewayOperation_CnTimeRequestType
 			m := comfoconnect.Message{
 				Src: c.MyUUID,
@@ -219,10 +189,10 @@ func (c *Client) keepAlive(ctx context.Context) {
 			_, err := c.conn.Write(m.Encode())
 			if err != nil {
 				if errors.Cause(err) == io.EOF {
-					log.Debug("Connection closed, stopping keep alives")
+					helpers.StackLogger().Debug("Connection closed, stopping keep alives")
 					return
 				}
-				log.Errorf("keepalive got error: %v", err)
+				helpers.StackLogger().Errorf("keepalive got error: %v", err)
 			}
 			c.reference++
 			if c.reference > 1024 {
@@ -233,17 +203,11 @@ func (c *Client) keepAlive(ctx context.Context) {
 }
 
 func (c *Client) subscribeAll() error {
-	log := logrus.WithFields(logrus.Fields{
-		"module": "client",
-		"object": "Client",
-		"method": "subscribeAll",
-	})
-
 	for _, sensor := range c.Sensors {
-		log.Debugf("subscribing to ppid:%d and type:%d", sensor.Ppid, sensor.Type)
+		helpers.StackLogger().Debugf("subscribing to ppid:%d and type:%d", sensor.Ppid, sensor.Type)
 		err := c.subscribe(sensor.Ppid, sensor.Type)
 		if err != nil {
-			log.Errorf("failed to subscribe to Sensor (ppid=%d, type=%d): %v", sensor.Ppid, sensor.Type, err)
+			helpers.StackLogger().Errorf("failed to subscribe to Sensor (ppid=%d, type=%d): %v", sensor.Ppid, sensor.Type, err)
 			//return err
 			continue
 		}
@@ -252,16 +216,8 @@ func (c *Client) subscribeAll() error {
 	return nil
 }
 
-func (c *Client) subscribe(ppid uint32, pType uint32) error {
-	log := logrus.WithFields(logrus.Fields{
-		"module": "client",
-		"object": "Client",
-		"method": "subscribe",
-		"ppid":   ppid,
-		"type":   pType,
-	})
-
-	log.Debug("subscribing")
+func (c *Client) subscribe(pdid uint32, pType uint32) error {
+	helpers.StackLogger().Debug("subscribing to pdid:%d, type:%d", pdid, pType)
 	operationType := pb.GatewayOperation_CnRpdoRequestType
 	zone := uint32(1)
 	m := &comfoconnect.Message{
@@ -272,70 +228,56 @@ func (c *Client) subscribe(ppid uint32, pType uint32) error {
 			Reference: &c.reference,
 		},
 		OperationType: &pb.CnRpdoRequest{
-			Pdid: &ppid,
+			Pdid: &pdid,
 			Zone: &zone,
 			Type: &pType,
 		},
 	}
 	_, err := c.conn.Write(m.Encode())
 	if err != nil {
-		log.Errorf("failed to request RPDO: %v", err)
-		return errors.Wrap(err, "requesting RPDO")
+		return helpers.LogOnError(errors.Wrap(err, "requesting RPDO"))
 	}
-	log.Infof("subscribed to RPDO with reference: %d", c.reference)
+	helpers.StackLogger().Infof("subscribed to RPDO with reference: %d", c.reference)
 	c.reference++
 
 	for i := 0; i < 10; i++ {
 		m, err = c.receive()
 		if err != nil {
-			log.Errorf("failed to receive CnRpdoConfirm: %v", err)
-			return errors.Wrap(err, "receiving CnRpdoConfirm")
+			return helpers.LogOnError(errors.Wrap(err, "receiving CnRpdoConfirm"))
 		}
-		log.Debugf("received: %v with err=%v", m, err)
+		helpers.StackLogger().Debugf("received: %v with err=%v", m, err)
 		if m.Operation.Type.String() == "CnRpdoConfirmType" {
-			log.Debugf("subscription confirmed after %d times", i+1)
+			helpers.StackLogger().Debugf("subscription confirmed after %d times", i+1)
 			return nil
 		}
 	}
-	return errors.New("Failed to receive CnRpdoConfirm")
+	return helpers.LogOnError(errors.New("Failed to receive CnRpdoConfirm"))
 }
 
 func (c *Client) receive() (*comfoconnect.Message, error) {
-	log := logrus.WithFields(logrus.Fields{
-		"module": "client",
-		"object": "Client",
-		"method": "receive",
-	})
-
 	message, err := comfoconnect.NewMessageFromSocket(c.conn)
 	if err == nil {
-		log.Infof("received %v from %s", message, c.conn.RemoteAddr().String())
+		helpers.StackLogger().Infof("received %v from %s", message, c.conn.RemoteAddr().String())
 		if message.Operation.Type != nil {
 			generateMetrics(message)
 		}
 	} else {
 		if errors.Cause(err) == io.EOF {
-			log.Error("client left")
-			return nil, err
+			return nil, helpers.LogOnError(errors.Wrap(err, "client left"))
 		}
-		log.Debugf("receive err: %v", err)
+		helpers.StackLogger().Debugf("receive err: %v", err)
 	}
-	return message, err
+	return message, helpers.LogOnError(err)
 }
 
 func generateMetrics(message *comfoconnect.Message) {
-	log := logrus.WithFields(logrus.Fields{
-		"module": "proxy",
-		"method": "generateMetrics",
-	})
-
 	switch message.Operation.Type.String() {
 	case "CnRpdoNotificationType":
 		conv := message.DecodePDO()
-		log.Infof("Got RPDO: %s %v with value %f", reflect.TypeOf(conv), conv, conv.Tofloat64())
+		helpers.StackLogger().Infof("Got RPDO: %s %v with value %f", reflect.TypeOf(conv), conv, conv.Tofloat64())
 		metricsGauge.WithLabelValues(conv.GetID(), conv.GetDescription()).Set(conv.Tofloat64())
 	case "CnAlarmNotificationType":
-		log.Warnf("Got alarm notification: %v", message)
+		helpers.StackLogger().Warnf("Got alarm notification: %v", message)
 	}
-	log.Debugf("called for %v", message)
+	helpers.StackLogger().Debugf("called for %v", message)
 }

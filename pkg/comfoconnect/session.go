@@ -12,9 +12,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 
 	"github.com/hsmade/comfoconnectbridge/pb"
+	"github.com/hsmade/comfoconnectbridge/pkg/helpers"
 )
 
 type Session struct {
@@ -25,19 +25,11 @@ type Session struct {
 }
 
 func NewSession(ctx context.Context, wg *sync.WaitGroup, comfoConnectIP string, pin uint32, src []byte) (*Session, error) {
-	log := logrus.WithFields(logrus.Fields{
-		"module":         "comfoconnect",
-		"method":         "NewSession",
-		"comfoConnectIP": comfoConnectIP,
-		"pin":            pin,
-		"src":            src,
-	})
-
+	helpers.StackLogger().Infof("Starting new sessions with src:%x", src)
 	// first ping the gateway to get its UUID
 	dst, err := DiscoverGateway(comfoConnectIP)
 	if err != nil {
-		log.Errorf("failed to discover gateway: %v", err)
-		return nil, errors.Wrap(err, "discovering gateway")
+		return nil, helpers.LogOnError(errors.Wrap(err, "discovering gateway"))
 	}
 
 	if src == nil {
@@ -46,14 +38,14 @@ func NewSession(ctx context.Context, wg *sync.WaitGroup, comfoConnectIP string, 
 		src = append(make([]byte, 16), id[:]...)
 	}
 
-	log.Debugf("set src=%x and dst=%x", src, dst)
+	helpers.StackLogger().Debugf("set src=%x and dst=%x", src, dst)
 
 	// connect to the gateway
 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:56747", comfoConnectIP))
 	if err != nil {
 		return nil, err
 	}
-	log.Debugf("connected to %s", conn.RemoteAddr())
+	helpers.StackLogger().Debugf("connected to %s", conn.RemoteAddr())
 
 	// send a registration request
 	deviceName := "Proxy"
@@ -73,25 +65,22 @@ func NewSession(ctx context.Context, wg *sync.WaitGroup, comfoConnectIP string, 
 		},
 	}
 
-	log.Debugf("Writing RegisterAppRequest: %x", m.Encode())
+	helpers.StackLogger().Debugf("Writing RegisterAppRequest: %x", m.Encode())
 	_, err = conn.Write(m.Encode())
 	if err != nil {
-		log.Errorf("failed to send RegisterAppRequest: %v", err)
-		return nil, errors.Wrap(err, "sending RegisterAppRequest")
+		return nil, helpers.LogOnError(errors.Wrap(err, "sending RegisterAppRequest"))
 	}
 
 	// receive the confirmation for the registration
-	log.Debugf("receiving RegisterAppConfirm")
+	helpers.StackLogger().Debugf("receiving RegisterAppConfirm")
 	m, err = NewMessageFromSocket(conn)
 	if err != nil {
-		log.Errorf("failed to receive RegisterAppConfirm: %v", err)
-		return nil, errors.Wrap(err, "receiving RegisterAppConfirm")
+		return nil, helpers.LogOnError(errors.Wrap(err, "receiving RegisterAppConfirm"))
 	}
 	if m.Operation.Type.String() != "RegisterAppConfirmType" {
-		log.Errorf("invalid message type, expected RegisterAppConfirm but got: %v", m.String())
-		return nil, errors.New(fmt.Sprintf("received invalid message type instead of RegisterAppConfirmType: %v", m.String()))
+		return nil, helpers.LogOnError(errors.New(fmt.Sprintf("received invalid message type instead of RegisterAppConfirmType: %v", m.String())))
 	}
-	log.Debugf("received RegisterAppConfirm: %x", m.Encode())
+	helpers.StackLogger().Debugf("received RegisterAppConfirm: %x", m.Encode())
 
 	// send a start session request
 	reference++
@@ -106,19 +95,16 @@ func NewSession(ctx context.Context, wg *sync.WaitGroup, comfoConnectIP string, 
 		OperationType: &pb.StartSessionRequest{},
 	}.Encode())
 	if err != nil {
-		log.Errorf("failed to send StartSessionRequest: %v", err)
-		return nil, errors.Wrap(err, "sending StartSessionRequest")
+		return nil, helpers.LogOnError(errors.Wrap(err, "sending StartSessionRequest"))
 	}
 
 	// receive the confirmation for the session
 	m, err = NewMessageFromSocket(conn)
 	if err != nil {
-		log.Errorf("failed to receive StartSessionConfirm: %v", err)
-		return nil, errors.Wrap(err, "receiving StartSessionConfirm")
+		return nil, helpers.LogOnError(errors.Wrap(err, "receiving StartSessionConfirm"))
 	}
 	if m.Operation.Type.String() != "StartSessionConfirmType" {
-		log.Errorf("invalid message type, expected StartSessionConfirm but got: %v", m.String())
-		return nil, errors.New(fmt.Sprintf("received invalid message type instead of StartSessionConfirmType: %v", m.String()))
+		return nil, helpers.LogOnError(errors.New(fmt.Sprintf("received invalid message type instead of StartSessionConfirmType: %v", m.String())))
 	}
 
 	s := Session{
@@ -128,19 +114,13 @@ func NewSession(ctx context.Context, wg *sync.WaitGroup, comfoConnectIP string, 
 		Conn: conn,
 	}
 
-	log.Debug("starting keep-alive loop")
+	helpers.StackLogger().Debug("starting keep-alive loop")
 	wg.Add(1)
 	go s.keepAlive(ctx, wg)
 	return &s, nil
 }
 
 func (s *Session) keepAlive(ctx context.Context, wg *sync.WaitGroup) {
-	log := logrus.WithFields(logrus.Fields{
-		"module": "comfoconnect",
-		"object": "Session",
-		"method": "keepAlive",
-	})
-
 	ticker := time.NewTicker(5 * time.Second)
 	reference := uint32(50)
 	for {
@@ -149,7 +129,7 @@ func (s *Session) keepAlive(ctx context.Context, wg *sync.WaitGroup) {
 			wg.Done()
 			return
 		case <-ticker.C:
-			log.Debug("sending keep alive")
+			helpers.StackLogger().Debug("sending keep alive")
 			operationType := pb.GatewayOperation_CnTimeRequestType
 			m := Message{
 				Src: s.Src,
@@ -163,10 +143,10 @@ func (s *Session) keepAlive(ctx context.Context, wg *sync.WaitGroup) {
 			_, err := s.Conn.Write(m.Encode())
 			if err != nil {
 				if errors.Cause(err) == io.EOF {
-					log.Debug("Connection closed, stopping keepalives")
+					helpers.StackLogger().Debug("Connection closed, stopping keepalives")
 					return
 				}
-				log.Errorf("keepalive got error: %v", err)
+				helpers.StackLogger().Errorf("keepalive got error: %v", err)
 			}
 			reference++
 			if reference > 1024 {
@@ -178,21 +158,14 @@ func (s *Session) keepAlive(ctx context.Context, wg *sync.WaitGroup) {
 
 // send a UDP packet to `ip` and expect a searchGatewayResponse with the uuid
 func DiscoverGateway(ip string) (uuid []byte, err error) {
-	log := logrus.WithFields(logrus.Fields{
-		"module": "comfoconnect",
-		"method": "DiscoverGateway",
-	})
-
 	raddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:56747", ip))
 	if err != nil {
-		log.Errorf("could not resolve gateway address %s: %v", ip, err)
-		return nil, errors.Wrap(err, fmt.Sprintf("resolving gateway address: %s", ip))
+		return nil, helpers.LogOnError(errors.Wrap(err, fmt.Sprintf("resolving gateway address: %s", ip)))
 	}
 
 	conn, err := net.DialUDP("udp", nil, raddr)
 	if err != nil {
-		log.Errorf("could not connect to gateway address %s: %v", ip, err)
-		return nil, errors.Wrap(err, fmt.Sprintf("connectinng to gateway address: %s", ip))
+		return nil, helpers.LogOnError(errors.Wrap(err, fmt.Sprintf("connectinng to gateway address: %s", ip)))
 	}
 	defer conn.Close()
 
@@ -200,15 +173,13 @@ func DiscoverGateway(ip string) (uuid []byte, err error) {
 
 	_, err = conn.Write([]byte{0x0a, 0x00}) // wake up gateway
 	if err != nil {
-		log.Errorf("could write discovery packet to gateway address %s: %v", ip, err)
-		return nil, errors.Wrap(err, fmt.Sprintf("writing discovery packet to gateway address: %s", ip))
+		return nil, helpers.LogOnError(errors.Wrap(err, fmt.Sprintf("writing discovery packet to gateway address: %s", ip)))
 	}
 
 	buf := make([]byte, 1024)
 	_, err = conn.Read(buf)
 	if err != nil {
-		log.Errorf("could read message from gateway address %s: %v", ip, err)
-		return nil, errors.Wrap(err, fmt.Sprintf("reading message from gateway address: %s", ip))
+		return nil, helpers.LogOnError(errors.Wrap(err, fmt.Sprintf("reading message from gateway address: %s", ip)))
 	}
 	response := pb.SearchGatewayResponse{}
 	err = proto.Unmarshal(buf[2:], &response)
@@ -217,19 +188,14 @@ func DiscoverGateway(ip string) (uuid []byte, err error) {
 	//	return nil, errors.Wrap(err, fmt.Sprintf("marshalling message from gateway address: %s", ip))
 	//}
 
-	return response.Uuid, nil
+	return response.Uuid, helpers.LogOnError(err)
 }
 
 func (s *Session) Close() {
-	log := logrus.WithFields(logrus.Fields{
-		"module": "comfoconnect",
-		"object": "Session",
-		"method": "Close",
-	})
 	// send a start session request
 	defer s.Conn.Close()
 
-	log.Debug("sending CloseSessionRequest")
+	helpers.StackLogger().Debug("sending CloseSessionRequest")
 	reference := uint32(1)
 	operationType := pb.GatewayOperation_CloseSessionRequestType
 	_, _ = s.Conn.Write(Message{
@@ -246,20 +212,15 @@ func (s *Session) Close() {
 func (s *Session) Receive() (*Message, error) {
 	_ = s.Conn.SetReadDeadline(time.Now().Add(time.Millisecond * 300))
 	m, err := NewMessageFromSocket(s.Conn)
-	return m, err
+	return m, helpers.LogOnError(err)
 }
 
 func (s *Session) Send(message Message) error {
-	log := logrus.WithFields(logrus.Fields{
-		"module": "comfoconnect",
-		"object": "Session",
-		"method": "Send",
-	})
 	span := opentracing.GlobalTracer().StartSpan("comfoconnect.Session.Send", opentracing.ChildOf(message.Span.Context()))
 	defer span.Finish()
 	SpanSetMessage(span, message)
 	length, err := s.Conn.Write(message.Encode())
-	log.Infof("Wrote %d bytes to gateway. err:%v bytes:%x message:%v", length, err, message.Encode(), message)
+	helpers.StackLogger().Infof("Wrote %d bytes to gateway. err:%v bytes:%x message:%v", length, err, message.Encode(), message)
 	span.SetTag("written", length)
-	return err
+	return helpers.LogOnError(err)
 }

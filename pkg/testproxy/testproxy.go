@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 
 	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
+	"github.com/hsmade/comfoconnectbridge/pkg/helpers"
 )
 
 type Proxy struct {
@@ -23,12 +23,12 @@ type Proxy struct {
 func NewProxy(comfoConnect string) *Proxy {
 	addr, err := net.ResolveTCPAddr("tcp4", ":56747")
 	if err != nil {
-		logrus.Fatalf("failed to resolve address: %v", err)
+		helpers.StackLogger().Fatalf("failed to resolve address: %v", err)
 	}
 
 	listener, err := net.ListenTCP("tcp4", addr)
 	if err != nil {
-		logrus.Fatalf("failed to create listener: %v", err)
+		helpers.StackLogger().Fatalf("failed to create listener: %v", err)
 	}
 
 	return &Proxy{
@@ -40,12 +40,12 @@ func NewProxy(comfoConnect string) *Proxy {
 }
 
 func (p *Proxy) Run() {
-	logrus.Debug("Starting new Proxy listener")
+	helpers.StackLogger().Debug("Starting new Proxy listener")
 	var handlers sync.WaitGroup
 	for {
 		select {
 		case <-p.quit:
-			logrus.Info("Shutting down tcp server")
+			helpers.StackLogger().Info("Shutting down tcp server")
 			p.listener.Close()
 			handlers.Wait()
 			close(p.exited)
@@ -54,17 +54,17 @@ func (p *Proxy) Run() {
 		default:
 			err := p.listener.SetDeadline(time.Now().Add(time.Second * 1))
 			if err != nil {
-				logrus.Errorf("failed to set read deadline: %v", err)
+				helpers.StackLogger().Errorf("failed to set read deadline: %v", err)
 				continue
 			}
 
-			// logrus.Debug("waiting for new connections")
+			// helpers.StackLogger().Debug("waiting for new connections")
 			conn, err := p.listener.Accept()
 			if err != nil {
 				if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {
 					continue
 				}
-				logrus.Errorf("failed to accept connection: %v", err)
+				helpers.StackLogger().Errorf("failed to accept connection: %v", err)
 				continue
 			}
 			handlers.Add(1)
@@ -72,7 +72,7 @@ func (p *Proxy) Run() {
 				for {
 					err := p.handleClient(conn)
 					if err != nil {
-						logrus.Errorf("failed to handle connection: %v", err)
+						helpers.StackLogger().Errorf("failed to handle connection: %v", err)
 						break
 					}
 				}
@@ -91,13 +91,13 @@ func (p *Proxy) copy(from, to net.Conn, wg *sync.WaitGroup) {
 			if errors.Cause(err) == io.EOF {
 				return
 			}
-			logrus.Errorf("src: %s, dst:%s, err: %v", from.RemoteAddr(), to.RemoteAddr(), err)
+			helpers.StackLogger().Errorf("src: %s, dst:%s, err: %v", from.RemoteAddr(), to.RemoteAddr(), err)
 			continue
 		}
 
-		logrus.Infof("received message: %v", message)
+		helpers.StackLogger().Infof("received message: %v", message)
 		writeLen, err := to.Write(message.RawMessage)
-		logrus.Debugf("wrote %d: %v", writeLen, err)
+		helpers.StackLogger().Debugf("wrote %d: %v", writeLen, err)
 	}
 }
 
@@ -119,8 +119,8 @@ func (p *Proxy) handleClient(conn net.Conn) error {
 }
 
 func (p *Proxy) Stop() {
-	logrus.Info("Stopping tcp server")
+	helpers.StackLogger().Info("Stopping tcp server")
 	close(p.quit)
 	<-p.exited
-	logrus.Info("Stopped tcp server")
+	helpers.StackLogger().Info("Stopped tcp server")
 }

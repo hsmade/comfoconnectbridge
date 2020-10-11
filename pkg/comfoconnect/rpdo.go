@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/sirupsen/logrus"
+	"github.com/hsmade/comfoconnectbridge/pkg/helpers"
 )
 
 type RpdoTypeConverter interface {
@@ -83,12 +83,6 @@ func (r RpdoType6) Tofloat64() float64 {
 }
 
 func NewPpid(ppid uint32, data []byte) RpdoTypeConverter {
-	log := logrus.WithFields(logrus.Fields{
-		"module": "comfoconnect",
-		"method": "NewPpid",
-		"ppid":   ppid,
-	})
-
 	switch ppid {
 	case 16:
 		return RpdoType1{rpdoType{ppid, "Away indicator (`01` = low, medium, high fan speed, `07` = away)"}, data}
@@ -271,7 +265,7 @@ func NewPpid(ppid uint32, data []byte) RpdoTypeConverter {
 	case 802:
 		return RpdoType1{rpdoType{ppid, "Unknown"}, data}
 	default:
-		log.Errorf(fmt.Sprintf("unable to decode Rpdo with ppid: %d", ppid))
+		helpers.StackLogger().Errorf(fmt.Sprintf("unable to decode Rpdo with ppid: %d", ppid))
 		return RpdoType1{rpdoType{ppid, "unknown"}, data}
 	}
 }

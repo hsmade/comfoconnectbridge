@@ -6,11 +6,11 @@ import (
 	"os/signal"
 	"time"
 
-	"github.com/prometheus/common/log"
 	"github.com/sirupsen/logrus"
 
 	"github.com/hsmade/comfoconnectbridge/pkg/client"
 	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
+	"github.com/hsmade/comfoconnectbridge/pkg/helpers"
 	"github.com/hsmade/comfoconnectbridge/pkg/instrumentation"
 )
 
@@ -34,7 +34,7 @@ func main() {
 	// first ping the gateway to get its UUID
 	GatewayUUID, err := comfoconnect.DiscoverGateway(GatewayIP)
 	if err != nil {
-		log.Fatalf("failed to discover gateway: %v", err)
+		helpers.StackLogger().Fatalf("failed to discover gateway: %v", err)
 	}
 
 	c := client.Client{
@@ -137,9 +137,9 @@ func main() {
 
 	c.Run(ctx)
 
-	logrus.Info("waiting for ctrl-signalChannel")
+	helpers.StackLogger().Info("waiting for ctrl-signalChannel")
 	for range signalChannel {
-		logrus.Info("closing down")
+		helpers.StackLogger().Info("closing down")
 		cancel()
 		os.Exit(0)
 	}

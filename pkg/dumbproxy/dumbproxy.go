@@ -5,17 +5,16 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"reflect"
 	"sync"
 	"time"
 
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/sirupsen/logrus"
 
 	"github.com/hsmade/comfoconnectbridge/pb"
 	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
+	"github.com/hsmade/comfoconnectbridge/pkg/helpers"
 )
 
 var (
@@ -33,23 +32,17 @@ type DumbProxy struct {
 }
 
 func (d DumbProxy) Run(ctx context.Context, wg *sync.WaitGroup) {
-	log := logrus.WithFields(logrus.Fields{
-		"module": "dumbproxy",
-		"object": "DumbProxy",
-		"method": "Run",
-	})
 	prometheus.MustRegister(metricsGauge)
-
-	log.Info("starting proxy")
+	helpers.StackLogger().Info("starting proxy")
 
 	addr, err := net.ResolveTCPAddr("tcp4", ":56747")
 	if err != nil {
-		log.Fatalf("failed to resolve address: %v", err)
+		helpers.PanicOnError(errors.Wrap(err, "failed to resolve address"))
 	}
 
 	listener, err := net.ListenTCP("tcp4", addr)
 	if err != nil {
-		log.Fatalf("failed to create listener: %v", err)
+		helpers.PanicOnError(errors.Wrap(err, "failed to create listener"))
 	}
 
 	for {
@@ -60,7 +53,7 @@ func (d DumbProxy) Run(ctx context.Context, wg *sync.WaitGroup) {
 		default:
 			err := listener.SetDeadline(time.Now().Add(time.Millisecond * 100))
 			if err != nil {
-				log.Errorf("failed to set read deadline: %v", err)
+				helpers.StackLogger().Errorf("failed to set read deadline: %v", err)
 				continue
 			}
 
@@ -69,16 +62,15 @@ func (d DumbProxy) Run(ctx context.Context, wg *sync.WaitGroup) {
 				if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {
 					continue
 				}
-				log.Errorf("failed to accept connection: %v", err)
+				helpers.StackLogger().Errorf("failed to accept connection: %v", err)
 				continue
 			}
 
 			gatewayConnection, err := net.Dial("tcp", fmt.Sprintf("%s:56747", d.GatewayIP))
 			if err != nil {
-				log.Errorf("connect to gw: %v", err)
-				panic(err) // no use to linger around if we can't connect
+				helpers.PanicOnError(errors.Wrap(err, "connecting to gw")) // no use to linger around if we can't connect
 			}
-			log.Debugf("connected to %s", gatewayConnection.RemoteAddr())
+			helpers.StackLogger().Debugf("connected to %s", gatewayConnection.RemoteAddr())
 
 			listenerChan := make(chan []byte, 100)
 			gatewayChannel := make(chan []byte, 100)
@@ -93,68 +85,51 @@ func (d DumbProxy) Run(ctx context.Context, wg *sync.WaitGroup) {
 }
 
 func (d DumbProxy) proxyReceiveMessage(conn net.Conn, channel chan []byte) {
-	log := logrus.WithFields(logrus.Fields{
-		"module": "dumbproxy",
-		"object": "DumbProxy",
-		"method": "proxyReceive",
-	})
 	for {
 		err := conn.SetReadDeadline(time.Now().Add(time.Millisecond * 100))
 		if err != nil {
-			log.Warnf("failed to set readDeadline: %v", err)
+			helpers.StackLogger().Warnf("failed to set readDeadline: %v", err)
 		}
 
 		message, err := comfoconnect.NewMessageFromSocket(conn)
 		if err == nil {
-			log.Infof("received %v from %s", message, conn.RemoteAddr().String())
+			helpers.StackLogger().Infof("received %v from %s", message, conn.RemoteAddr().String())
 			if message.Operation.Type != nil {
 				generateMetrics(*message)
 				channel <- message.Encode()
 			}
 		} else {
 			if errors.Cause(err) == io.EOF {
-				log.Error("client left")
-				os.Exit(0)
+				helpers.PanicOnError(errors.New("client left"))
 			}
-			log.Debugf("receive err: %v", err)
+			helpers.StackLogger().Debugf("receive err: %v", err)
 		}
 	}
 }
 
 func (d DumbProxy) proxySend(conn net.Conn, channel chan []byte) {
-	log := logrus.WithFields(logrus.Fields{
-		"module": "dumbproxy",
-		"object": "DumbProxy",
-		"method": "proxySend",
-	})
 	for {
 		b := <-channel
 		length, err := conn.Write(b)
 		if err == nil {
-			log.Infof("sent %d bytes: %x to %s", length, b[:length], conn.RemoteAddr().String())
+			helpers.StackLogger().Infof("sent %d bytes: %x to %s", length, b[:length], conn.RemoteAddr().String())
 		} else {
-			log.Debugf("send err: %v", err)
+			helpers.StackLogger().Debugf("send err: %v", err)
 		}
 	}
 }
 
 func generateMetrics(message comfoconnect.Message) {
-
-	log := logrus.WithFields(logrus.Fields{
-		"module": "proxy",
-		"method": "generateMetrics",
-	})
-
 	switch message.Operation.Type.String() {
 	case "CnRpdoRequestType":
 		b := message.OperationType.(*pb.CnRpdoRequest)
-		log.Infof("CnRpdoRequestType: ppid:%d type:%d zone:%d", *b.Pdid, *b.Type, *b.Zone)
+		helpers.StackLogger().Infof("CnRpdoRequestType: ppid:%d type:%d zone:%d", *b.Pdid, *b.Type, *b.Zone)
 	case "CnRpdoNotificationType":
 		conv := message.DecodePDO()
-		log.Infof("Got RPDO: %s %v with value %f", reflect.TypeOf(conv), conv, conv.Tofloat64())
+		helpers.StackLogger().Infof("Got RPDO: %s %v with value %f", reflect.TypeOf(conv), conv, conv.Tofloat64())
 		metricsGauge.WithLabelValues(conv.GetID(), conv.GetDescription()).Set(conv.Tofloat64())
 	case "CnAlarmNotificationType":
-		log.Warnf("Got alarm notification: %v", message)
+		helpers.StackLogger().Warnf("Got alarm notification: %v", message)
 	}
-	log.Debugf("called for %v", message)
+	helpers.StackLogger().Debugf("called for %v", message)
 }
