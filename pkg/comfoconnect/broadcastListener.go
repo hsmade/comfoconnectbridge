@@ -11,14 +11,14 @@ import (
 )
 
 type BroadcastListener struct {
-	ResponseIP string
-	myUUID     []byte
-	listener   *net.UDPConn
-	quit       chan bool
-	exited     chan bool
+	AdvertiseIP   string
+	advertiseUUID []byte
+	listener      *net.UDPConn
+	quit          chan bool
+	exited        chan bool
 }
 
-func NewBroadcastListener(myIP string, myUUID []byte) *BroadcastListener {
+func NewBroadcastListener(advertiseIP string, advertiseUUID []byte) *BroadcastListener {
 	addr, err := net.ResolveUDPAddr("udp4", ":56747")
 	helpers.PanicOnError(err)
 
@@ -26,11 +26,11 @@ func NewBroadcastListener(myIP string, myUUID []byte) *BroadcastListener {
 	helpers.PanicOnError(err)
 
 	l := BroadcastListener{
-		ResponseIP: myIP,
-		myUUID:     myUUID,
-		listener:   listener,
-		quit:       make(chan bool),
-		exited:     make(chan bool),
+		AdvertiseIP:   advertiseIP,
+		advertiseUUID: advertiseUUID,
+		listener:      listener,
+		quit:          make(chan bool),
+		exited:        make(chan bool),
 	}
 
 	return &l
@@ -82,8 +82,8 @@ func (l *BroadcastListener) Run() {
 }
 
 func (l *BroadcastListener) handleConnection(addr *net.UDPAddr) error {
-	helpers.StackLogger().Debugf("writing searchGatewayResponse: ip=%s uuid=%s", l.ResponseIP, l.myUUID)
-	_, err := l.listener.WriteToUDP(CreateSearchGatewayResponse(l.ResponseIP, l.myUUID), addr)
+	helpers.StackLogger().Debugf("writing searchGatewayResponse: ip=%s uuid=%s", l.AdvertiseIP, l.advertiseUUID)
+	_, err := l.listener.WriteToUDP(CreateSearchGatewayResponse(l.AdvertiseIP, l.advertiseUUID), addr)
 	if err != nil {
 		return helpers.LogOnError(errors.Wrap(err, "responding to SearchGatewayRequest"))
 	}

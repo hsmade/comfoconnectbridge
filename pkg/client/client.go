@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"reflect"
+	"sync"
 	"time"
 
 	"github.com/pkg/errors"
@@ -27,14 +28,16 @@ var (
 )
 
 type Client struct {
-	GatewayIP   string
-	GatewayUUID []byte
-	conn        net.Conn
-	DeviceName  string
-	reference   uint32
-	Pin         uint32
-	MyUUID      []byte
-	Sensors     []Sensor
+	GatewayIP        string
+	GatewayUUID      []byte
+	conn             net.Conn
+	DeviceName       string
+	reference        uint32
+	Pin              uint32
+	MyUUID           []byte
+	Sensors          []Sensor
+	ReceivedMessages chan *comfoconnect.Message
+	sendLock         sync.Locker
 }
 
 type Sensor struct {
@@ -45,40 +48,53 @@ type Sensor struct {
 func (c Client) Run(ctx context.Context) {
 	prometheus.MustRegister(metricsGauge)
 
-	for {
+	for { // restart when we loose the session
 		select {
 		case <-ctx.Done():
 			return
 		default:
-			c.startSession(ctx)
+			c.runSession(ctx)
 		}
 	}
 }
 
-func (c *Client) startSession(ctx context.Context) {
+func (c *Client) sendMessage(message *comfoconnect.Message) error {
+	if c.reference == 0 {
+		c.reference = 1 // FIXME: need NewClient() to solve this in a better way
+	}
+	c.sendLock.Lock()
+	err := message.Send(c.conn)
+	c.reference++
+	if c.reference > 1024 {
+		c.reference = 1
+	}
+	c.sendLock.Unlock()
+	return err
+}
+
+func (c *Client) runSession(ctx context.Context) {
 	connection, err := net.Dial("tcp", fmt.Sprintf("%s:56747", c.GatewayIP))
 	if err != nil {
 		helpers.StackLogger().Errorf("connect to gw: %v", err)
-		//os.Exit(-1)
-		time.Sleep(5 * time.Second)
+		time.Sleep(5 * time.Second) // we don't want to spam the gateway
 		return
 	}
 	helpers.StackLogger().Infof("connected to %s", connection.RemoteAddr())
 	c.conn = connection
 
-	err = c.register()
+	err = c.registerClient()
 	if err != nil {
 		helpers.StackLogger().Errorf("registering with gw: %v", err)
 		return
 	}
 
-	err = c.sessionRequest()
+	err = c.requestNewSession()
 	if err != nil {
 		helpers.StackLogger().Errorf("session request with gw: %v", err)
 		return
 	}
 
-	go c.keepAlive(ctx)
+	go c.keepAliveFunc(ctx) // ping the gateway every now and then, to keep the session alive
 
 	err = c.subscribeAll()
 	if err != nil {
@@ -86,24 +102,28 @@ func (c *Client) startSession(ctx context.Context) {
 		return
 	}
 
+	// endless loop of receiving messages
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
-			_, err := c.receive()
+			message, err := c.receiveMessage()
 			if err != nil {
-				helpers.StackLogger().Errorf("receive from gw: %v", err)
+				helpers.StackLogger().Errorf("receiveMessage from gw: %v", err)
 				return
+			}
+			if c.ReceivedMessages != nil {
+				c.ReceivedMessages <- message
 			}
 		}
 	}
 }
 
-func (c *Client) register() error {
+func (c *Client) registerClient() error {
 	c.reference++
 	operationType := pb.GatewayOperation_RegisterAppRequestType
-	m := &comfoconnect.Message{
+	message := &comfoconnect.Message{
 		Src: c.MyUUID,
 		Dst: c.GatewayUUID,
 		Operation: &pb.GatewayOperation{
@@ -117,32 +137,30 @@ func (c *Client) register() error {
 		},
 	}
 
-	helpers.StackLogger().Debugf("Writing RegisterAppRequest: %x", m.Encode())
-	_, err := c.conn.Write(m.Encode())
+	helpers.StackLogger().Debugf("Writing RegisterAppRequest: %x", message.Encode())
+	err := c.sendMessage(message)
 	if err != nil {
 		return helpers.LogOnError(errors.Wrap(err, "sending RegisterAppRequest"))
 	}
-	c.reference++
 
-	// receive the confirmation for the registration
+	// receiveMessage the confirmation for the registration
 	helpers.StackLogger().Debugf("receiving RegisterAppConfirm")
-	m, err = comfoconnect.NewMessageFromSocket(c.conn)
+	message, err = c.receiveMessage()
 	if err != nil {
 		return helpers.LogOnError(errors.Wrap(err, "receiving RegisterAppConfirm"))
 	}
-	if m.Operation.Type.String() != "RegisterAppConfirmType" {
-		return helpers.LogOnError(errors.New(fmt.Sprintf("received invalid message type instead of RegisterAppConfirmType: %v", m.String())))
+	if message.Operation.Type.String() != "RegisterAppConfirmType" {
+		return helpers.LogOnError(errors.New(fmt.Sprintf("received invalid message type instead of RegisterAppConfirmType: %v", message.String())))
 	}
-	helpers.StackLogger().Debugf("received RegisterAppConfirm: %x", m.Encode())
+	helpers.StackLogger().Debugf("received RegisterAppConfirm: %x", message.Encode())
 
 	return nil
 }
 
-func (c *Client) sessionRequest() error {
+func (c *Client) requestNewSession() error {
 	// send a start session request
-	c.reference++
 	operationType := pb.GatewayOperation_StartSessionRequestType
-	_, err := c.conn.Write(comfoconnect.Message{
+	message := &comfoconnect.Message{
 		Src: c.MyUUID,
 		Dst: c.GatewayUUID,
 		Operation: &pb.GatewayOperation{
@@ -150,25 +168,26 @@ func (c *Client) sessionRequest() error {
 			Reference: &c.reference,
 		},
 		OperationType: &pb.StartSessionRequest{},
-	}.Encode())
+	}
+	err := c.sendMessage(message)
 	if err != nil {
 		return helpers.LogOnError(errors.Wrap(err, "sending StartSessionRequest"))
 	}
-	c.reference++
 
-	// receive the confirmation for the session
-	m, err := comfoconnect.NewMessageFromSocket(c.conn)
+	// receiveMessage the confirmation for the session
+	message, err = c.receiveMessage()
 	if err != nil {
 		return helpers.LogOnError(errors.Wrap(err, "receiving StartSessionConfirm"))
 	}
-	if m.Operation.Type.String() != "StartSessionConfirmType" {
-		return helpers.LogOnError(errors.New(fmt.Sprintf("received invalid message type instead of StartSessionConfirmType: %v", m.String())))
+	if message.Operation.Type.String() != "StartSessionConfirmType" {
+		return helpers.LogOnError(errors.New(fmt.Sprintf("received invalid message type instead of StartSessionConfirmType: %v", message.String())))
 	}
 
 	return nil
 }
 
-func (c *Client) keepAlive(ctx context.Context) {
+// ping gateway to keep session alive
+func (c *Client) keepAliveFunc(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
 	for {
 		select {
@@ -177,7 +196,7 @@ func (c *Client) keepAlive(ctx context.Context) {
 		case <-ticker.C:
 			helpers.StackLogger().Debug("sending keep alive")
 			operationType := pb.GatewayOperation_CnTimeRequestType
-			m := comfoconnect.Message{
+			message := comfoconnect.Message{
 				Src: c.MyUUID,
 				Dst: c.GatewayUUID,
 				Operation: &pb.GatewayOperation{
@@ -186,7 +205,7 @@ func (c *Client) keepAlive(ctx context.Context) {
 				},
 				OperationType: &pb.CnTimeRequest{},
 			}
-			_, err := c.conn.Write(m.Encode())
+			err := c.sendMessage(&message)
 			if err != nil {
 				if errors.Cause(err) == io.EOF {
 					helpers.StackLogger().Debug("Connection closed, stopping keep alives")
@@ -194,14 +213,11 @@ func (c *Client) keepAlive(ctx context.Context) {
 				}
 				helpers.StackLogger().Errorf("keepalive got error: %v", err)
 			}
-			c.reference++
-			if c.reference > 1024 {
-				c.reference = 1
-			}
 		}
 	}
 }
 
+// Subscribe to all known PDIDs (c.Sensors)
 func (c *Client) subscribeAll() error {
 	for _, sensor := range c.Sensors {
 		helpers.StackLogger().Debugf("subscribing to ppid:%d and type:%d", sensor.Ppid, sensor.Type)
@@ -220,7 +236,7 @@ func (c *Client) subscribe(pdid uint32, pType uint32) error {
 	helpers.StackLogger().Debug("subscribing to pdid:%d, type:%d", pdid, pType)
 	operationType := pb.GatewayOperation_CnRpdoRequestType
 	zone := uint32(1)
-	m := &comfoconnect.Message{
+	message := &comfoconnect.Message{
 		Src: c.MyUUID,
 		Dst: c.GatewayUUID,
 		Operation: &pb.GatewayOperation{
@@ -233,28 +249,27 @@ func (c *Client) subscribe(pdid uint32, pType uint32) error {
 			Type: &pType,
 		},
 	}
-	_, err := c.conn.Write(m.Encode())
+	err := c.sendMessage(message)
 	if err != nil {
 		return helpers.LogOnError(errors.Wrap(err, "requesting RPDO"))
 	}
 	helpers.StackLogger().Infof("subscribed to RPDO with reference: %d", c.reference)
-	c.reference++
 
 	for i := 0; i < 10; i++ {
-		m, err = c.receive()
+		message, err = c.receiveMessage()
 		if err != nil {
 			return helpers.LogOnError(errors.Wrap(err, "receiving CnRpdoConfirm"))
 		}
-		helpers.StackLogger().Debugf("received: %v with err=%v", m, err)
-		if m.Operation.Type.String() == "CnRpdoConfirmType" {
+		helpers.StackLogger().Debugf("received: %v with err=%v", message, err)
+		if message.Operation.Type.String() == "CnRpdoConfirmType" {
 			helpers.StackLogger().Debugf("subscription confirmed after %d times", i+1)
 			return nil
 		}
 	}
-	return helpers.LogOnError(errors.New("Failed to receive CnRpdoConfirm"))
+	return helpers.LogOnError(errors.New("Failed to receiveMessage CnRpdoConfirm"))
 }
 
-func (c *Client) receive() (*comfoconnect.Message, error) {
+func (c *Client) receiveMessage() (*comfoconnect.Message, error) {
 	message, err := comfoconnect.NewMessageFromSocket(c.conn)
 	if err == nil {
 		helpers.StackLogger().Infof("received %v from %s", message, c.conn.RemoteAddr().String())
@@ -265,7 +280,7 @@ func (c *Client) receive() (*comfoconnect.Message, error) {
 		if errors.Cause(err) == io.EOF {
 			return nil, helpers.LogOnError(errors.Wrap(err, "client left"))
 		}
-		helpers.StackLogger().Debugf("receive err: %v", err)
+		helpers.StackLogger().Debugf("receiveMessage err: %v", err)
 	}
 	return message, helpers.LogOnError(err)
 }

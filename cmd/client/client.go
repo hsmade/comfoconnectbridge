@@ -137,7 +137,7 @@ func main() {
 
 	c.Run(ctx)
 
-	helpers.StackLogger().Info("waiting for ctrl-signalChannel")
+	helpers.StackLogger().Info("waiting for ctrl-signal")
 	for range signalChannel {
 		helpers.StackLogger().Info("closing down")
 		cancel()
