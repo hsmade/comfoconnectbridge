@@ -82,7 +82,7 @@ func (l *BroadcastListener) Run() {
 }
 
 func (l *BroadcastListener) handleConnection(addr *net.UDPAddr) error {
-	helpers.StackLogger().Debugf("writing searchGatewayResponse: ip=%s uuid=%s", l.AdvertiseIP, l.advertiseUUID)
+	helpers.StackLogger().Debugf("writing searchGatewayResponse: ip=%s uuid=%x", l.AdvertiseIP, l.advertiseUUID)
 	_, err := l.listener.WriteToUDP(CreateSearchGatewayResponse(l.AdvertiseIP, l.advertiseUUID), addr)
 	if err != nil {
 		return helpers.LogOnError(errors.Wrap(err, "responding to SearchGatewayRequest"))

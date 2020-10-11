@@ -9,8 +9,12 @@ import (
 )
 
 func StackLogger() *logrus.Entry {
+	return logWithStack()
+}
+
+func logWithStack() *logrus.Entry {
 	pcs := make([]uintptr, 10)
-	size := runtime.Callers(2, pcs)
+	size := runtime.Callers(3, pcs)
 	stack := make([]string, size)
 	for index, pc := range pcs {
 		if pc == 0 {
@@ -19,7 +23,7 @@ func StackLogger() *logrus.Entry {
 		f := runtime.FuncForPC(pc)
 		file, line := f.FileLine(pc)
 		//fmt.Printf("--> [%d] %s:%d %s()\n", index, file, line, f.Name())
-		stack[index] = fmt.Sprintf("%s:%d %s()\n", file, line, f.Name())
+		stack[index] = fmt.Sprintf("%s:%d %s()", file, line, f.Name())
 	}
 
 	fields := logrus.Fields{
@@ -37,7 +41,7 @@ func LogOnError(err error) error {
 		return err
 	}
 
-	StackLogger().Error(err)
+	logWithStack().Error(err)
 	return err
 }
 

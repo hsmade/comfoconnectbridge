@@ -177,16 +177,18 @@ func DiscoverGateway(ip string) (uuid []byte, err error) {
 	}
 
 	buf := make([]byte, 1024)
-	_, err = conn.Read(buf)
+	length, err := conn.Read(buf)
 	if err != nil {
 		return nil, helpers.LogOnError(errors.Wrap(err, fmt.Sprintf("reading message from gateway address: %s", ip)))
 	}
+	buf = buf[2:length]
+
 	response := pb.SearchGatewayResponse{}
-	err = proto.Unmarshal(buf[2:], &response)
-	//err = response.XXX_Unmarshal(buf[2:])
-	//if err != nil {
-	//	return nil, errors.Wrap(err, fmt.Sprintf("marshalling message from gateway address: %s", ip))
-	//}
+	err = proto.Unmarshal(buf, &response)
+	if err != nil {
+		//return nil, errors.Wrap(err, fmt.Sprintf("marshalling message from gateway address: %s", ip))
+		helpers.StackLogger().Tracef("tried to marshall: '%x'", buf)
+	}
 
 	return response.Uuid, helpers.LogOnError(err)
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"reflect"
 	"sync"
 	"time"
@@ -29,6 +30,8 @@ var (
 
 type DumbProxy struct {
 	GatewayIP string
+	logLocker sync.Locker
+	LogFile   *os.File
 }
 
 func (d DumbProxy) Run(ctx context.Context, wg *sync.WaitGroup) {
@@ -72,19 +75,28 @@ func (d DumbProxy) Run(ctx context.Context, wg *sync.WaitGroup) {
 			}
 			helpers.StackLogger().Debugf("connected to %s", gatewayConnection.RemoteAddr())
 
-			listenerChan := make(chan []byte, 100)
-			gatewayChannel := make(chan []byte, 100)
+			listenerChan := make(chan *comfoconnect.Message, 100)
+			gatewayChannel := make(chan *comfoconnect.Message, 100)
 
-			go d.proxyReceiveMessage(listenerConnection, listenerChan) // app - > chan
-			go d.proxySend(listenerConnection, gatewayChannel)         // chan -> app
+			go d.receiveLoop(listenerConnection, listenerChan) // app - > chan
+			go d.sendLoop(listenerConnection, gatewayChannel)  // chan -> app
 
-			go d.proxyReceiveMessage(gatewayConnection, gatewayChannel) // gw   -> chan
-			go d.proxySend(gatewayConnection, listenerChan)             // chan -> gw
+			go d.receiveLoop(gatewayConnection, gatewayChannel) // gw   -> chan
+			go d.sendLoop(gatewayConnection, listenerChan)      // chan -> gw
 		}
 	}
 }
 
-func (d DumbProxy) proxyReceiveMessage(conn net.Conn, channel chan []byte) {
+func (d *DumbProxy) log(from, to string, message *comfoconnect.Message) {
+	d.logLocker.Lock()
+	if d.LogFile != nil {
+		_, err := d.LogFile.Write([]byte(fmt.Sprintf("from %s | to %s | %s", from, to, message.String())))
+		_ = helpers.LogOnError(err)
+	}
+	d.logLocker.Unlock()
+}
+
+func (d DumbProxy) receiveLoop(conn net.Conn, channel chan *comfoconnect.Message) {
 	for {
 		err := conn.SetReadDeadline(time.Now().Add(time.Millisecond * 100))
 		if err != nil {
@@ -92,27 +104,30 @@ func (d DumbProxy) proxyReceiveMessage(conn net.Conn, channel chan []byte) {
 		}
 
 		message, err := comfoconnect.NewMessageFromSocket(conn)
-		if err == nil {
-			helpers.StackLogger().Infof("received %v from %s", message, conn.RemoteAddr().String())
-			if message.Operation.Type != nil {
-				generateMetrics(*message)
-				channel <- message.Encode()
-			}
-		} else {
+		if err != nil {
 			if errors.Cause(err) == io.EOF {
 				helpers.PanicOnError(errors.New("client left"))
 			}
 			helpers.StackLogger().Debugf("receive err: %v", err)
+			continue
+		}
+
+		helpers.StackLogger().Infof("received %v from %s", message, conn.RemoteAddr().String())
+		if message.Operation.Type != nil {
+			generateMetrics(*message)
+			d.log(conn.RemoteAddr().String(), "proxy", message)
+			channel <- message
 		}
 	}
 }
 
-func (d DumbProxy) proxySend(conn net.Conn, channel chan []byte) {
+func (d DumbProxy) sendLoop(conn net.Conn, channel chan *comfoconnect.Message) {
 	for {
-		b := <-channel
-		length, err := conn.Write(b)
+		message := <-channel
+		d.log("proxy", conn.RemoteAddr().String(), message)
+		err := message.Send(conn)
 		if err == nil {
-			helpers.StackLogger().Infof("sent %d bytes: %x to %s", length, b[:length], conn.RemoteAddr().String())
+			helpers.StackLogger().Infof("sent '%s' to %s", message, conn.RemoteAddr().String())
 		} else {
 			helpers.StackLogger().Debugf("send err: %v", err)
 		}

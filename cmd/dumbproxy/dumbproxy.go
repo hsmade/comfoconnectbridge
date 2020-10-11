@@ -44,8 +44,13 @@ func main() {
 	go l.Run()
 	defer l.Stop()
 
+	logFile, err := os.OpenFile("dumbproxy.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		panic(err)
+	}
 	p := dumbproxy.DumbProxy{
 		GatewayIP: "192.168.0.19",
+		LogFile: logFile,
 	}
 	go p.Run(ctx, wg)
 
