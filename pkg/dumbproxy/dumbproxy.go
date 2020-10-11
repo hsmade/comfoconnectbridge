@@ -30,11 +30,11 @@ var (
 
 type DumbProxy struct {
 	GatewayIP string
-	logLocker sync.Locker
+	logLocker sync.Mutex
 	LogFile   *os.File
 }
 
-func (d DumbProxy) Run(ctx context.Context, wg *sync.WaitGroup) {
+func (d *DumbProxy) Run(ctx context.Context, wg *sync.WaitGroup) {
 	prometheus.MustRegister(metricsGauge)
 	helpers.StackLogger().Info("starting proxy")
 
@@ -90,13 +90,13 @@ func (d DumbProxy) Run(ctx context.Context, wg *sync.WaitGroup) {
 func (d *DumbProxy) log(from, to string, message *comfoconnect.Message) {
 	d.logLocker.Lock()
 	if d.LogFile != nil {
-		_, err := d.LogFile.Write([]byte(fmt.Sprintf("from %s | to %s | %s", from, to, message.String())))
+		_, err := d.LogFile.Write([]byte(fmt.Sprintf("from %s | to %s | %s\n", from, to, message.String())))
 		_ = helpers.LogOnError(err)
 	}
 	d.logLocker.Unlock()
 }
 
-func (d DumbProxy) receiveLoop(conn net.Conn, channel chan *comfoconnect.Message) {
+func (d *DumbProxy) receiveLoop(conn net.Conn, channel chan *comfoconnect.Message) {
 	for {
 		err := conn.SetReadDeadline(time.Now().Add(time.Millisecond * 100))
 		if err != nil {
@@ -121,7 +121,7 @@ func (d DumbProxy) receiveLoop(conn net.Conn, channel chan *comfoconnect.Message
 	}
 }
 
-func (d DumbProxy) sendLoop(conn net.Conn, channel chan *comfoconnect.Message) {
+func (d *DumbProxy) sendLoop(conn net.Conn, channel chan *comfoconnect.Message) {
 	for {
 		message := <-channel
 		d.log("proxy", conn.RemoteAddr().String(), message)

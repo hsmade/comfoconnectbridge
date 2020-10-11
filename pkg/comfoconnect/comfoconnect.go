@@ -1,6 +1,7 @@
 package comfoconnect
 
 import (
+	"encoding/binary"
 	"fmt"
 	"net"
 	"reflect"
@@ -28,7 +29,16 @@ func CreateSearchGatewayResponse(ipAddress string, uuid []byte) []byte {
 	resp.Version = &version
 	b, _ := proto.Marshal(&resp)
 	//b, _ := resp.XXX_Marshal([]byte{0x12, 0x24}, false)
-	return b
+	//12240a0e3139322e3136382e3137382e3532121000000000003310138001144fd71e23e61801
+	//    0a0e3139322e3136382e3137382e3532121000000000003310138001144fd71e23e61801
+
+	// FIXME: this whole thing is fishy!
+	result := []byte{0x12}
+	length := make([]byte, 2)
+	binary.BigEndian.PutUint16(length, uint16(len(b)))
+	result = append(result, length[1:]...)
+	result = append(result, b...)
+	return result
 }
 
 // takes the name for an operation type and finds the struct for it

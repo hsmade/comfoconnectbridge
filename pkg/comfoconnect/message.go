@@ -43,6 +43,9 @@ func NewMessageFromSocket(conn net.Conn) (*Message, error) {
 	var length uint32
 	err = binary.Read(conn, binary.BigEndian, &length)
 	if err != nil {
+		if err, ok := err.(net.Error); ok && err.Timeout() {
+			return nil, err // don't want to log timeout errors
+		}
 		return nil, helpers.LogOnError(errors.Wrap(err, "reading message length from socket"))
 	}
 	if length > 1024 {
