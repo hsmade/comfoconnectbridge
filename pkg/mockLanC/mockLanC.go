@@ -113,7 +113,8 @@ func (m *MockLanC) handleClient(conn net.Conn) error {
 		//case "StartSessionRequestType":
 		//	m.respond(conn, message.CreateResponse(proto.GatewayOperation_OK))
 		case "StartSessionRequestType":
-			m.respond(conn, message.CreateResponse(nil, pb.GatewayOperation_OK))
+			response, _ := message.CreateResponse(pb.GatewayOperation_OK)
+			_ = response.Send(conn)
 
 			i := uint32(1)
 			mode := pb.CnNodeNotification_NODE_NORMAL
@@ -124,7 +125,8 @@ func (m *MockLanC) handleClient(conn net.Conn) error {
 				Mode:      &mode,
 			}
 
-			m.respond(conn, message.CreateCustomResponse(nil, pb.GatewayOperation_CnNodeNotificationType, &a))
+			response, _ = message.CreateCustomResponse(pb.GatewayOperation_CnNodeNotificationType, &a)
+			_ = response.Send(conn)
 			i48 := uint32(48)
 			i5 := uint32(5)
 			i255 := uint32(255)
@@ -135,9 +137,11 @@ func (m *MockLanC) handleClient(conn net.Conn) error {
 				ZoneId:    &i255,
 				Mode:      &mode,
 			}
-			m.respond(conn, message.CreateCustomResponse(nil, pb.GatewayOperation_CnNodeNotificationType, &a))
+			response, _ = message.CreateCustomResponse(pb.GatewayOperation_CnNodeNotificationType, &a)
+			_ = response.Send(conn)
 		default:
-			m.respond(conn, message.CreateResponse(nil, -1))
+			response, _ := message.CreateResponse(-1)
+			_ = response.Send(conn)
 		}
 	}
 }
@@ -149,6 +153,7 @@ func (m *MockLanC) Stop() {
 	helpers.StackLogger().Info("Stopped tcp server")
 }
 
+// FIXME: remove this
 func (m *MockLanC) respond(conn net.Conn, data []byte) error {
 	helpers.StackLogger().Debugf("responding to %v with %x", conn.RemoteAddr(), data)
 	_, err := conn.Write(data)

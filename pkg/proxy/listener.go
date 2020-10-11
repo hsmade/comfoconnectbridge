@@ -197,14 +197,24 @@ func (a *App) handleMessage(message comfoconnect.Message, gateway chan comfoconn
 	case "RegisterAppRequestType":
 		helpers.StackLogger().Debug("responding to RegisterAppRequestType")
 		a.uuid = message.Src
-		_, err := a.conn.Write(message.CreateResponse(span, pb.GatewayOperation_OK))
+		response, err := message.CreateResponse(pb.GatewayOperation_OK)
+		if err != nil {
+			span.SetTag("err", err)
+			helpers.StackLogger().Warnf("failed to write response for RegisterAppRequestType: %v", err)
+		}
+		err = response.Send(a.conn)
 		if err != nil {
 			span.SetTag("err", err)
 			helpers.StackLogger().Warnf("failed to write response for RegisterAppRequestType: %v", err)
 		}
 	case "StartSessionRequestType":
 		helpers.StackLogger().Debug("responding to StartSessionRequestType")
-		_, err := a.conn.Write(message.CreateResponse(span, pb.GatewayOperation_OK))
+		response, err := message.CreateResponse(pb.GatewayOperation_OK)
+		if err != nil {
+			span.SetTag("err", err)
+			helpers.StackLogger().Warnf("failed to write response for StartSessionRequestType: %v", err)
+		}
+		err = response.Send(a.conn)
 		if err != nil {
 			span.SetTag("err", err)
 			helpers.StackLogger().Warnf("failed to write response for StartSessionRequestType: %v", err)
@@ -218,7 +228,8 @@ func (a *App) handleMessage(message comfoconnect.Message, gateway chan comfoconn
 			ZoneId:    &i,
 			Mode:      &mode,
 		}
-		_, err = a.conn.Write(message.CreateCustomResponse(span, pb.GatewayOperation_CnNodeNotificationType, &notification))
+		response, _ = message.CreateCustomResponse(pb.GatewayOperation_CnNodeNotificationType, &notification)
+		err = response.Send(a.conn)
 		if err != nil {
 			span.SetTag("err", err)
 			helpers.StackLogger().Warnf("failed to write CnNodeNotification-1: %v", err)
@@ -234,7 +245,8 @@ func (a *App) handleMessage(message comfoconnect.Message, gateway chan comfoconn
 			ZoneId:    &i255,
 			Mode:      &mode,
 		}
-		_, err = a.conn.Write(message.CreateCustomResponse(span, pb.GatewayOperation_CnNodeNotificationType, &notification))
+		response, _ = message.CreateCustomResponse(pb.GatewayOperation_CnNodeNotificationType, &notification)
+		err = response.Send(a.conn)
 		if err != nil {
 			span.SetTag("err", err)
 			helpers.StackLogger().Warnf("failed to write CnNodeNotification-2: %v", err)

@@ -123,24 +123,14 @@ func (m Message) String() string {
 }
 
 // creates the correct response message as a byte slice, for the parent message
-// FIXME: return new message, rename the func
-func (m Message) CreateResponse(span opentracing.Span, status pb.GatewayOperation_GatewayResult) []byte {
-	// FIXME: span should not be here?
-	if span == nil {
-		span = opentracing.StartSpan("comfoconnect.Message.CreateResponse")
-	} else {
-		span = opentracing.GlobalTracer().StartSpan("comfoconnect.Message.CreateResponse", opentracing.ChildOf(span.Context()))
-	}
-	defer span.Finish()
-	span.SetTag("status", status)
-
+func (m Message) CreateResponse(status pb.GatewayOperation_GatewayResult) (*Message, error) {
 	helpers.StackLogger().Debugf("creating response for operation type: %s", reflect.TypeOf(m.OperationType).Elem().Name())
 	message := Message{
+		// copy these, swapped from the original message
 		Src: m.Dst,
 		Dst: m.Src,
 	}
 	responseType := getResponseTypeForOperationType(message.OperationType)
-	span.SetTag("responseType", responseType.String())
 	operation := pb.GatewayOperation{
 		Type:      &responseType,
 		Reference: message.Operation.Reference,
@@ -154,10 +144,7 @@ func (m Message) CreateResponse(span opentracing.Span, status pb.GatewayOperatio
 
 	responseStruct := GetStructForType(responseType.String())
 	if responseStruct == nil {
-		err := errors.New(fmt.Sprintf("unable to find struct for type: %s", responseType.String()))
-		helpers.StackLogger().Error(err)
-		span.SetTag("err", err)
-		return nil
+		return nil, helpers.LogOnError(errors.New(fmt.Sprintf("unable to find struct for type: %s", responseType.String())))
 	}
 
 	// set the data for the operation type
@@ -203,57 +190,55 @@ func (m Message) CreateResponse(span opentracing.Span, status pb.GatewayOperatio
 		}
 
 	}
-	result := message.packMessage(&operation, responseStruct)
-	span.SetTag("result", result)
-	return result
+	message.Operation = &operation
+	message.OperationType = responseStruct
+	return &message, nil
 }
 
-func (m Message) CreateCustomResponse(span opentracing.Span, operationType pb.GatewayOperation_OperationType, operationTypeStruct OperationType) []byte {
-	if span == nil {
-		span = opentracing.StartSpan("comfoconnect.Message.CreateCustomResponse")
-	} else {
-		span = opentracing.GlobalTracer().StartSpan("comfoconnect.Message.CreateCustomResponse", opentracing.ChildOf(span.Context()))
-	}
-	defer span.Finish()
-	span.SetTag("operationType", operationType.String())
-
+func (m Message) CreateCustomResponse(operationType pb.GatewayOperation_OperationType, operationTypeStruct OperationType) (*Message, error) {
 	helpers.StackLogger().Debugf("creating custom response for operation type: %s", reflect.TypeOf(operationTypeStruct).Elem().Name())
 	operation := pb.GatewayOperation{
 		Type:      &operationType,
-		Reference: m.Operation.Reference, // if we add this, we get double reference (prefixed)??
+		Reference: m.Operation.Reference,
 		Result:    nil,
 	}
 
-	return m.packMessage(&operation, operationTypeStruct)
+	message := Message{
+		Src:           m.Dst,
+		Dst:           m.Src,
+		Operation:     &operation,
+		OperationType: operationTypeStruct,
+	}
+	return &message, nil
 }
 
-// setup a binary message ready to send
-func (m Message) packMessage(operation *pb.GatewayOperation, operationType OperationType) []byte {
-	operationBytes, _ := proto.Marshal(operation)
+// Encode will Marshall the contents of a message into bytes
+func (m Message) Encode() []byte {
+	operationBytes, _ := proto.Marshal(m.Operation)
 	helpers.StackLogger().Tracef("operationBytes: %x", operationBytes)
-	operationTypeBytes, _ := proto.Marshal(operationType)
+
+	operationTypeBytes, _ := proto.Marshal(m.OperationType)
 	helpers.StackLogger().Tracef("operationTypeBytes: %x", operationTypeBytes)
+
 	response := make([]byte, 4)
 	binary.BigEndian.PutUint32(response, uint32(len(operationTypeBytes)+34+len(operationBytes))) // raw message length
 	helpers.StackLogger().Tracef("length: %x", response)
+
 	response = append(response, m.Src...)
 	response = append(response, m.Dst...)
+
 	b := make([]byte, 2)
 	binary.BigEndian.PutUint16(b, uint16(len(operationBytes))) // op length
 	helpers.StackLogger().Tracef("op length: %x", b)
 	response = append(response, b...)
+
 	response = append(response, operationBytes...) // gatewayOperation
 	response = append(response, operationTypeBytes...)
 
 	return response
 }
 
-// FIXME: remove this
-func (m Message) Encode() []byte {
-	return m.packMessage(m.Operation, m.OperationType)
-}
-
-// FIXME: remove this
+// FIXME: remove this?
 func (m Message) DecodePDO() RpdoTypeConverter {
 	if m.Operation.Type.String() != "CnRpdoNotificationType" {
 		return nil
@@ -261,4 +246,11 @@ func (m Message) DecodePDO() RpdoTypeConverter {
 	ppid := m.OperationType.(*pb.CnRpdoNotification).Pdid
 	data := m.OperationType.(*pb.CnRpdoNotification).Data
 	return NewPpid(*ppid, data)
+}
+
+func (m *Message) Send(conn net.Conn) error {
+	helpers.StackLogger().Debugf("Sending '%v' to %s", *m, conn.RemoteAddr().String())
+	data := m.Encode()
+	_, err := conn.Write(data)
+	return helpers.LogOnError(err)
 }
