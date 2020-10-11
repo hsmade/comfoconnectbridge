@@ -37,7 +37,7 @@ type Client struct {
 	MyUUID           []byte
 	Sensors          []Sensor
 	ReceivedMessages chan *comfoconnect.Message
-	sendLock         sync.Locker
+	sendLock         sync.Mutex
 }
 
 type Sensor struct {
