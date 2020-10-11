@@ -4,6 +4,8 @@ TODO
 * write a client that asks for all known PDOs and exposes metrics on them
 * write API for fan speed
 * set TCP_NODELAY
+* ~~replace log instances with method~~
+* rethink tracing and create methods for wrapping info in spans
 * rewrite read and write methods
     ```Java code for sending:
                    int length = transportMessage.operationByteArray.length + 34;
