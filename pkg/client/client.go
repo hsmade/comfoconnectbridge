@@ -182,6 +182,10 @@ func (c *Client) requestNewSession() error {
 	if message.Operation.Type.String() != "StartSessionConfirmType" {
 		return helpers.LogOnError(errors.New(fmt.Sprintf("received invalid message type instead of StartSessionConfirmType: %v", message.String())))
 	}
+	result := *message.Operation.Result
+	if result != pb.GatewayOperation_OK {
+		return helpers.LogOnError(errors.New(fmt.Sprintf("failed to start new session. Gateway responded with: %s", result.String())))
+	}
 
 	return nil
 }

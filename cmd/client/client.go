@@ -30,7 +30,7 @@ func main() {
 	signalChannel := make(chan os.Signal, 1)
 	signal.Notify(signalChannel, os.Interrupt)
 
-	GatewayIP := "192.168.0.19"
+	GatewayIP := "192.168.180.12"
 	// first ping the gateway to get its UUID
 	GatewayUUID, err := comfoconnect.DiscoverGateway(GatewayIP)
 	if err != nil {
@@ -135,7 +135,7 @@ func main() {
 		},
 	}
 
-	c.Run(ctx)
+	go c.Run(ctx)
 
 	helpers.StackLogger().Info("waiting for ctrl-signal")
 	for range signalChannel {
