@@ -133,10 +133,10 @@ func (m Message) CreateResponse(status pb.GatewayOperation_GatewayResult) (*Mess
 		Src: m.Dst,
 		Dst: m.Src,
 	}
-	responseType := getResponseTypeForOperationType(message.OperationType)
+	responseType := getResponseTypeForOperationType(m.OperationType)
 	operation := pb.GatewayOperation{
 		Type:      &responseType,
-		Reference: message.Operation.Reference,
+		Reference: m.Operation.Reference,
 		Result:    &status,
 	}
 	message.Operation = &operation

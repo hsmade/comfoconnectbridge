@@ -8,6 +8,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// This smells! Needs to be done as all the other ones are wrapping logWithStack as well, and we skip a static number pc frames
 func StackLogger() *logrus.Entry {
 	return logWithStack()
 }
@@ -47,6 +48,6 @@ func LogOnError(err error) error {
 
 func PanicOnError(err error) {
 	if LogOnError(err) != nil {
-		PanicOnError(err)
+		panic(err)
 	}
 }

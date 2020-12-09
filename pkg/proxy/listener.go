@@ -181,7 +181,7 @@ func (a *App) HandleConnection(ctx context.Context, wg *sync.WaitGroup, gateway 
 			messageReceivedCount.WithLabelValues(message.Operation.Type.String()).Inc()
 			span := opentracing.GlobalTracer().StartSpan("proxy.App.HandleConnection.ReceivedMessage", opentracing.ChildOf(message.Span.Context()))
 			comfoconnect.SpanSetMessage(span, message)
-			helpers.StackLogger().WithField("span", span.Context().(jaeger.SpanContext).String()).Debugf("got a message from app(%s): %v", a.conn.RemoteAddr(), message)
+			helpers.StackLogger().WithField("span", span.Context().(jaeger.SpanContext).String()).Infof("got a message from app(%s): %v", a.conn.RemoteAddr(), message)
 			a.uuid = message.Src
 			a.handleMessage(message, gateway)
 			span.Finish()
@@ -195,7 +195,7 @@ func (a *App) handleMessage(message comfoconnect.Message, gateway chan comfoconn
 
 	switch message.Operation.Type.String() {
 	case "RegisterAppRequestType":
-		helpers.StackLogger().Debug("responding to RegisterAppRequestType")
+		helpers.StackLogger().Info("responding to RegisterAppRequestType")
 		a.uuid = message.Src
 		response, err := message.CreateResponse(pb.GatewayOperation_OK)
 		if err != nil {
@@ -208,7 +208,7 @@ func (a *App) handleMessage(message comfoconnect.Message, gateway chan comfoconn
 			helpers.StackLogger().Warnf("failed to write response for RegisterAppRequestType: %v", err)
 		}
 	case "StartSessionRequestType":
-		helpers.StackLogger().Debug("responding to StartSessionRequestType")
+		helpers.StackLogger().Info("responding to StartSessionRequestType")
 		response, err := message.CreateResponse(pb.GatewayOperation_OK)
 		if err != nil {
 			span.SetTag("err", err)
@@ -265,6 +265,7 @@ func (a *App) Write(message comfoconnect.Message) error {
 	span := opentracing.GlobalTracer().StartSpan("proxy.App.Write")
 	comfoconnect.SpanSetMessage(span, message)
 	defer span.Finish()
+
 	e := message.Encode()
 	length, err := a.conn.Write(e)
 	helpers.StackLogger().Infof("Wrote %d bytes to app. err:%v bytes:%x message:%v", length, err, e, message)

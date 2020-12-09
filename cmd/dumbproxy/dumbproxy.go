@@ -12,7 +12,6 @@ import (
 	"github.com/hsmade/comfoconnectbridge/pkg/comfoconnect"
 	"github.com/hsmade/comfoconnectbridge/pkg/dumbproxy"
 	"github.com/hsmade/comfoconnectbridge/pkg/helpers"
-	"github.com/hsmade/comfoconnectbridge/pkg/instrumentation"
 )
 
 func main() {
@@ -25,8 +24,8 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	wg := &sync.WaitGroup{}
 
-	closer := instrumentation.EnableTracing("proxy", "tower:5775")
-	defer closer.Close()
+	//closer := instrumentation.EnableTracing("proxy", "tower:5775")
+	//defer closer.Close()
 	//instrumentation.EnableMetrics()
 
 	c := make(chan os.Signal, 1)
